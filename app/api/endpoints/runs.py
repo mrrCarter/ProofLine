@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from app.core.fsm import RuntimeState
 from app.schemas.error import ErrorResponse, error_detail
 from app.services.factory import get_vision_provider
+from app.services.receipts import public_key_payload, sign_run_receipt, verify_signed_receipt
 from app.services.rules import RuleEngine
 
 router = APIRouter()
@@ -24,8 +25,10 @@ TERMINAL_STATES = {
     RuntimeState.ERROR,
 }
 
-# In-memory storage is deliberately scoped to the walking skeleton.
+# In-memory storage is deliberately scoped to the prototype slice.
 runs: dict[str, dict[str, Any]] = {}
+receipts: dict[str, dict[str, Any]] = {}
+result_cache: dict[tuple[str, str], dict[str, Any]] = {}
 
 
 def _request_id(request: Request, form_request_id: Optional[str]) -> str:
@@ -106,12 +109,60 @@ def _model_dump(value: Any) -> dict[str, Any]:
     return value.dict()
 
 
-def _finding_payload(finding: Finding) -> dict[str, Any]:
+def _finding_payload(finding: Any) -> dict[str, Any]:
     return _model_dump(finding)
 
 
 def _terminal_state(run: dict[str, Any]) -> bool:
     return run["state"] in TERMINAL_STATES
+
+
+def _receipt_ref(run_id: str) -> str:
+    return f"/api/receipts/{run_id}"
+
+
+def _store_receipt(run: dict[str, Any]) -> dict[str, Any]:
+    receipt = sign_run_receipt(run)
+    receipts[run["runId"]] = receipt
+    run["receiptId"] = run["runId"]
+    run["receiptRef"] = _receipt_ref(run["runId"])
+    return receipt
+
+
+def _cache_key(run: dict[str, Any]) -> tuple[str, str]:
+    return (run["artifactSha256"], run["rulePack"])
+
+
+def _cache_result(run: dict[str, Any]) -> None:
+    result_cache[_cache_key(run)] = {
+        "verdict": run["verdict"],
+        "findings": run["findings"],
+        "rulePack": run["rulePack"],
+        "providers": run.get("providers", {}),
+    }
+
+
+def _complete_cached_run(run: dict[str, Any], cached: dict[str, Any]) -> None:
+    run["state"] = RuntimeState(cached["verdict"])
+    run["verdict"] = cached["verdict"]
+    run["findings"] = cached["findings"]
+    run["rulePack"] = cached["rulePack"]
+    run["providers"] = cached.get("providers", {})
+    run["latencyMs"] = int((time.monotonic() - run["startedAtMonotonic"]) * 1000)
+    run["timings"] = {"cacheMs": run["latencyMs"], "totalMs": run["latencyMs"]}
+    _store_receipt(run)
+    _append_event(
+        run,
+        "run.completed",
+        {
+            "runId": run["runId"],
+            "status": run["verdict"],
+            "verdict": run["verdict"],
+            "latencyMs": run["latencyMs"],
+            "receiptId": run["receiptId"],
+            "cacheHit": True,
+        },
+    )
 
 
 async def _run_skeleton_pipeline(run_id: str) -> None:
@@ -164,6 +215,7 @@ async def _execute_skeleton_pipeline(run: dict[str, Any]) -> None:
     run["state"] = RuntimeState.EXTRACTED
     run["ocr"] = _model_dump(ocr)
     provider_name = ocr.metadata.get("provider", "mock")
+    run["providers"] = {"ocr": provider_name, "adjudicator": None}
     _append_event(
         run,
         "ocr.completed",
@@ -212,6 +264,8 @@ async def _execute_skeleton_pipeline(run: dict[str, Any]) -> None:
     run["verdict"] = verdict.value
     run["latencyMs"] = int((time.monotonic() - started) * 1000)
     run["timings"]["totalMs"] = run["latencyMs"]
+    _store_receipt(run)
+    _cache_result(run)
     _append_event(
         run,
         "run.completed",
@@ -220,7 +274,7 @@ async def _execute_skeleton_pipeline(run: dict[str, Any]) -> None:
             "status": verdict.value,
             "verdict": verdict.value,
             "latencyMs": run["latencyMs"],
-            "receiptId": None,
+            "receiptId": run["receiptId"],
         },
     )
 
@@ -236,7 +290,7 @@ def _public_run(run: dict[str, Any]) -> dict[str, Any]:
         "rulePack": run.get("rulePack"),
         "latencyMs": run.get("latencyMs"),
         "timings": run.get("timings", {}),
-        "receiptRef": None,
+        "receiptRef": run.get("receiptRef"),
     }
 
 
@@ -278,6 +332,7 @@ async def create_run(
     parsed_application_data = _parse_application_data(application_data, rid)
     run_id = str(uuid.uuid4())
     artifact_hash = hashlib.sha256(image_bytes).hexdigest()
+    rule_pack_ref = RuleEngine().rule_pack_ref
     runs[run_id] = {
         "runId": run_id,
         "requestId": rid,
@@ -288,12 +343,53 @@ async def create_run(
         "state": RuntimeState.RECEIVED,
         "events": [],
         "timings": {},
+        "rulePack": rule_pack_ref,
         "startedAtMonotonic": time.monotonic(),
     }
     _append_event(runs[run_id], "run.created", {"runId": run_id, "artifactSha256": artifact_hash})
+    cached = result_cache.get((artifact_hash, rule_pack_ref))
+    if cached:
+        _complete_cached_run(runs[run_id], cached)
+        return {
+            "runId": run_id,
+            "requestId": rid,
+            "eventsUrl": f"/api/runs/{run_id}/events",
+            "receiptUrl": _receipt_ref(run_id),
+            "cacheHit": True,
+        }
+
     background_tasks.add_task(_run_skeleton_pipeline, run_id)
 
-    return {"runId": run_id, "requestId": rid, "eventsUrl": f"/api/runs/{run_id}/events"}
+    return {
+        "runId": run_id,
+        "requestId": rid,
+        "eventsUrl": f"/api/runs/{run_id}/events",
+        "cacheHit": False,
+    }
+
+
+@router.get("/receipts/pubkey", response_model=dict)
+async def get_receipt_public_key():
+    return public_key_payload()
+
+
+@router.post("/receipts/verify", response_model=dict)
+async def verify_receipt(receipt: dict[str, Any]):
+    return verify_signed_receipt(receipt)
+
+
+@router.get("/receipts/{run_id}", response_model=dict, responses={404: {"model": ErrorResponse}})
+async def get_receipt(request: Request, run_id: str):
+    receipt = receipts.get(run_id)
+    if receipt is None:
+        _raise_error(
+            404,
+            "RECEIPT_NOT_FOUND",
+            "Receipt not found",
+            _request_id(request, None),
+            {"runId": run_id},
+        )
+    return receipt
 
 
 @router.get("/runs/{run_id}", response_model=dict, responses={404: {"model": ErrorResponse}})
