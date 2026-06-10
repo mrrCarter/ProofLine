@@ -10,11 +10,13 @@ RUN npm run build
 FROM python:3.14-slim@sha256:c845af9399020c7e562969a13689e929074a10fd057acd1b1fad06a2fb068e97
 WORKDIR /app
 
-# Install system dependencies for OCR (Tesseract, PaddleOCR requirements)
-RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    tesseract-ocr \
+# Install system dependencies for OCR (Tesseract, PaddleOCR requirements).
+# Versions are pinned against Debian trixie, which backs python:3.14-slim.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1=1.7.0-1+b2 \
+    libglx-mesa0=25.0.7-2 \
+    libglib2.0-0t64=2.84.4-3~deb13u3 \
+    tesseract-ocr=5.5.0-1+b1 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system proofline \
