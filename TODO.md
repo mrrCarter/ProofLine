@@ -30,13 +30,14 @@ Lock map (#59235): api-01 → main.py + app/ (narrow to app/api/ + app/core/ pos
 - [x] QA (RULES-01 + VERIFY-01): all 10 §10 image fixtures present @a7fecf2; rule-engine `pytest -m latency` PASSED (p50 2.48ms / p95 2.79ms vs 4500ms); FULL-pipeline law-1 latency proof (preprocess→tesseract OCR→rules on the 10 image fixtures, asserts OCR genuinely executed, p95≤4500ms) wired @a7fecf2 + CI-enforced. HONEST: it SKIPS locally (no tesseract binary) → executes in CI/container (Dockerfile installs tesseract-ocr) or after local `apt install tesseract-ocr`; no measured full-pipeline p95 claimed yet.
 - Evidence: final re-gate GREEN @a7fecf2 (ruff all-pass · mypy clean 20 files · pytest 28 passed + 1 honest skip · UI npm/tsc/vite clean 179ms · pip-audit clean) · receipts sign/verify valid:true · app serves (healthz 200, Vite 200, ui-01) · OCR decision LESSONS §7 @1ae4a91. Phase-2 close by ORCH-01 (orch-01-opus-4.8).
 
-## Phase 3 — Batch + escalation (target: midday day 2)
-- [ ] API-01: batch endpoints, asyncio queue + process pool, per-label isolation, batch SSE, CSV export
-- [ ] API-01: env-gated VLM adjudicator adapter (timeout 10s, circuit breaker, advisory-only) behind feature flag; demo must work with flag OFF
-- [ ] UI-01: batch tab (progress, filterable table, export), "Try these" gallery with trap labels, "Run 50-label demo batch" button, receipt download
-- [ ] VISION-01: 50-label mixed demo batch fixture
-- [ ] VERIFY-01: confirm happy path never waits on adjudicator; confirm egress-blocked run works (`docker run --network none` variant or proxy-deny test)
-- Evidence: batch screenshot ___ · throughput numbers ___ · egress-blocked test output ___
+## Phase 3 — Batch + escalation — ✅ CLOSED 2026-06-10 ~10:55Z (re-gate GREEN @e4146a7, reproducible from origin)
+- [x] API-01: batch endpoints, asyncio queue + ProcessPoolExecutor, per-label isolation, batch SSE, CSV export @ddaa064 (per-label isolation live-verified: corrupt label ERRORs alone, others verdict+receiptRef, export.csv honest)
+- [x] API-01: env-gated VLM adjudicator adapter (10s timeout, circuit breaker, advisory-only) behind feature flag; demo works flag OFF @ddaa064 + sanitizer @d4f1b1e — law-3 live-verified (stored verdict from rule engine regardless of advice; advisory only in agent.opinion); happy-path-never-waits live-verified (51ms, 0 escalation w/ flag ON + blackhole endpoint)
+- [x] UI-01: batch tab (progress, filterable table, export), Try-these trap gallery, Run-50-label-demo, receipt download @1f1c9f8 + contract-align @33e429e
+- [x] VISION-01 (reassigned to RULES-01 — VISION absent): 50-label mixed demo batch fixture batch_mixed_50.zip @59461e3
+- [x] VERIFY-01: happy path never waits on adjudicator ✅ (51ms, 0 escalation) + egress-blocked run works ✅ (pipeline verified under total egress block; docker unavailable in WSL so proxy/network-deny path used)
+- [x] GATE HIGH found + fixed: verdict cache key now (artifactSha256, normalizedApplicationDataHash, rulePackVersion) @e4146a7 — stale-receipt collision proven dead by inversion (diff app data → fresh verdict + distinct receipt; same app data → 0ms cache hit). SPEC §5/§10 + LESSONS §5.4 cache-key correction flagged for Phase-6.
+- Evidence: re-gate GREEN @e4146a7 (ruff · mypy 22 files · pytest 36 passed + 1 honest skip + regression test · UI npm/tsc/vite build) · per-label isolation + law-3 + happy-path-bypass + CSV/SSE + egress-block all LIVE-tested by VERIFY-01 · cache-key HIGH closed by inversion. Phase-3 close by ORCH-01 (orch-01-opus-4.8).
 
 ## Phase 4 — Deploy (target: end of day 2)
 - [ ] INFRA-01: ECR push, cosign sign, ECS Fargate service (proofline-* tagged), CloudFront + DNS record, healthz green
