@@ -34,6 +34,21 @@ def _post_bourbon(client: TestClient) -> dict:
     return response.json()
 
 
+def _post_minimal_png(client: TestClient, application_data: dict) -> dict:
+    minimal_png = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+        "0000000a49444154789c6360000002000100ffff03000006000557bfab9d"
+        "0000000049454e44ae426082"
+    )
+    response = client.post(
+        "/api/runs",
+        files={"image": ("tiny.png", minimal_png, "image/png")},
+        data={"application_data": json.dumps(application_data)},
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
 def _terminal_run(client: TestClient, run_id: str) -> dict:
     for _ in range(20):
         response = client.get(f"/api/runs/{run_id}")
@@ -96,3 +111,26 @@ def test_artifact_rulepack_cache_returns_signed_receipt_for_new_run():
     second_receipt = client.get(second_run["receiptRef"]).json()
     assert second_receipt["runId"] == second_run["runId"]
     assert client.post("/api/receipts/verify", json=second_receipt).json()["valid"] is True
+
+
+def test_ui_origin_field_is_normalized_for_country_rule():
+    client = _client()
+    created = _post_minimal_png(client, {"brandName": "MOCK", "origin": "Imported"})
+    run = _terminal_run(client, created["runId"])
+    findings = {finding["ruleId"]: finding for finding in run["findings"]}
+
+    assert "COUNTRY_OF_ORIGIN_IF_IMPORT" in findings
+    assert findings["COUNTRY_OF_ORIGIN_IF_IMPORT"]["status"] == "NEEDS_REVIEW"
+    assert findings["COUNTRY_OF_ORIGIN_IF_IMPORT"]["expected"]["imported"] is True
+
+
+def test_commodity_selects_rule_pack():
+    client = _client()
+    created = _post_bourbon(client)
+    default_run = _terminal_run(client, created["runId"])
+
+    wine_created = _post_minimal_png(client, {"brandName": "MOCK", "commodity": "wine"})
+    wine_run = _terminal_run(client, wine_created["runId"])
+
+    assert default_run["rulePack"] == "spirits-v1@1.0.0"
+    assert wine_run["rulePack"] == "wine-v1@1.0.0"

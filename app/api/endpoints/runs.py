@@ -3,7 +3,9 @@ import hashlib
 import json
 import time
 import uuid
-from typing import Any, Optional
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, NoReturn, Optional
 
 from fastapi import APIRouter, BackgroundTasks, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -17,6 +19,13 @@ from app.services.rules import RuleEngine
 router = APIRouter()
 
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+RULE_PACKS_BY_COMMODITY = {
+    "spirits": PROJECT_ROOT / "rules" / "spirits-v1.yaml",
+    "wine": PROJECT_ROOT / "rules" / "wine-v1.yaml",
+    "malt": PROJECT_ROOT / "rules" / "malt-v1.yaml",
+    "malt beverage": PROJECT_ROOT / "rules" / "malt-v1.yaml",
+}
 TERMINAL_STATES = {
     RuntimeState.PASS,
     RuntimeState.FAIL,
@@ -41,7 +50,7 @@ def _raise_error(
     message: str,
     request_id: str,
     details: Any = None,
-) -> None:
+) -> NoReturn:
     raise HTTPException(
         status_code=status_code,
         detail=error_detail(code, message, request_id, details),
@@ -84,12 +93,51 @@ def _parse_application_data(raw: str, request_id: str) -> dict[str, Any]:
     return parsed
 
 
+def _normalize_application_data(parsed: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(parsed)
+    origin = normalized.get("origin")
+    if isinstance(origin, str) and origin.strip():
+        origin_value = origin.strip()
+        origin_key = origin_value.casefold()
+        domestic_values = {"domestic", "united states", "usa", "us", "u.s.", "u.s.a."}
+        if origin_key in domestic_values:
+            normalized.setdefault("imported", False)
+        elif "import" in origin_key:
+            normalized.setdefault("imported", True)
+            if ":" in origin_value:
+                country = origin_value.split(":", 1)[1].strip()
+                if country:
+                    normalized.setdefault("countryOfOrigin", country)
+        else:
+            normalized.setdefault("imported", True)
+            normalized.setdefault("countryOfOrigin", origin_value)
+    return normalized
+
+
 def _application_brand(application_data: dict[str, Any]) -> Optional[str]:
     for key in ("brandName", "brand_name", "brand", "applicantBrandName"):
         value = application_data.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+
+
+def _commodity(application_data: dict[str, Any]) -> str:
+    for key in ("commodity", "labelType", "label_type", "productType", "product_type"):
+        value = application_data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip().casefold()
+    return "spirits"
+
+
+@lru_cache(maxsize=8)
+def _rule_engine_for_commodity(commodity: str) -> RuleEngine:
+    rule_pack_path = RULE_PACKS_BY_COMMODITY.get(commodity, RULE_PACKS_BY_COMMODITY["spirits"])
+    return RuleEngine(rule_pack_path)
+
+
+def _rule_engine_for(application_data: dict[str, Any]) -> RuleEngine:
+    return _rule_engine_for_commodity(_commodity(application_data))
 
 
 def _append_event(run: dict[str, Any], event: str, data: dict[str, Any]) -> None:
@@ -231,7 +279,7 @@ async def _execute_skeleton_pipeline(run: dict[str, Any]) -> None:
     brand = _application_brand(run["applicationData"])
     rule_context = dict(run["applicationData"])
     rule_context["ocr_provider"] = provider_name
-    rule_engine = RuleEngine()
+    rule_engine = _rule_engine_for(rule_context)
     rule_result = rule_engine.evaluate_with_verdict(
         [_model_dump(item) for item in ocr.results],
         rule_context,
@@ -329,10 +377,10 @@ async def create_run(
             {"contentType": image.content_type, "detectedType": detected_type},
         )
 
-    parsed_application_data = _parse_application_data(application_data, rid)
+    parsed_application_data = _normalize_application_data(_parse_application_data(application_data, rid))
     run_id = str(uuid.uuid4())
     artifact_hash = hashlib.sha256(image_bytes).hexdigest()
-    rule_pack_ref = RuleEngine().rule_pack_ref
+    rule_pack_ref = _rule_engine_for(parsed_application_data).rule_pack_ref
     runs[run_id] = {
         "runId": run_id,
         "requestId": rid,
