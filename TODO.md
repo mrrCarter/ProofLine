@@ -3,15 +3,16 @@
 Canonical task board. No checkbox flips without evidence. ORCH-01 owns this file's lock.
 
 ## Phase 0 — Room boot (target: 30 min)
-- [ ] ORCH-01: start session, post FIRST_SENTI_MESSAGE, confirm 7 ACKs with laws=5/5 — session live, order posted+pinned #59177 by human; ACKs 1/7 (ORCH-01 #59180)
-- [ ] All: `sl ai identity provision --execute`; ORCH-01 posts identity list to room — ORCH-01: ident_4ca298ebbcca6c9f ACTIVE (posted #59188); 6 agents pending
+- [x] ORCH-01: start session, post FIRST_SENTI_MESSAGE, confirm 7 ACKs with laws=5/5 — session live, order posted+pinned #59177 by human; ACKs 7/7
+- [x] All: `sl ai identity provision --execute`; ORCH-01 posts identity list to room — registry posted #59202 (7 agents provisioned)
 - [ ] INFRA-01: verify `proofline-deployer` profile works and is scoped (attempt a read outside scope, paste the AccessDenied as evidence)
 - [x] ORCH-01: branch `proofline/takehome-v0`; protect main — pushed @ 5aa1197; protection PUT → allow_force_pushes=false, allow_deletions=false (#59188)
-- [ ] All: listeners/daemons running; ORCH-01 confirms via `sl session status --json` — orch-01 listener up; 6 agents pending
-- Evidence: session ID 36d95ac5-3074-40b4-8995-8961a5187523 · branch proofline/takehome-v0 @ 5aa1197 · identity list seq #59188 (partial, ORCH-01 only) · first recap seq ___
+- [x] All: listeners/daemons running; ORCH-01 confirms via `sl session status --json` — all listeners active
+- Evidence: session ID 36d95ac5-3074-40b4-8995-8961a5187523 · branch proofline/takehome-v0 @ 5aa1197 · identity list seq #59202 · first recap seq #59205
 
-## Phase 1 — Walking skeleton (target: end of hour 3)
+## Phase 1 — Walking skeleton (target: end of hour 3) — RELEASED #59235 (2026-06-10 07:54Z)
 A vertical slice that lies about nothing: upload → mock OCR → one real rule → verdict card → SSE timeline, deployed locally via compose.
+Lock map (#59235): api-01 → main.py + app/ (narrow to app/api/ + app/core/ post-scaffold) · vision-01 → app/vision/ · rules-01 → app/rules/ + rules/ + tests/ · ui-01 → ui/ · infra-01 → Dockerfile, compose.yaml, .github/ · verify-01 → no write locks.
 - [ ] API-01: FastAPI app, /healthz, POST /api/runs with validation + error schema, FSM enum, SSE endpoint with real events
 - [ ] VISION-01: provider interface + mock fixture provider (deterministic text+boxes+confidence)
 - [ ] RULES-01: finding schema, BRAND_NAME_MATCH end-to-end, rule pack loader (spirits-v1.yaml skeleton)
