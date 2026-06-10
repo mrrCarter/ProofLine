@@ -80,13 +80,15 @@ jobs:
         with:
           github_token: ${{ github.token }}
           sentinelayer_token: ${{ secrets.SENTINELAYER_TOKEN }}
-          # Managed LLM via the single purpose-scoped SENTINELAYER_TOKEN.
-          # The OPENAI_API_KEY / GOOGLE_API_KEY passthrough was removed: those
-          # secrets are not configured for this repo (they expanded to empty),
-          # the gate already ran through the token-managed path, and forwarding
-          # provider keys to a third-party action widened the blast radius for
-          # no benefit (Omar P2, omar-gate.yml secrets finding).
+          # Managed LLM (via SENTINELAYER_TOKEN) is the primary path. A SINGLE
+          # provider key (OPENAI_API_KEY — the model the scan uses, gpt-5.3-codex)
+          # is passed as the fallback so the gate stays operable when the managed
+          # daily quota is exhausted. GOOGLE_API_KEY is intentionally NOT passed:
+          # one key is the minimum needed, keeping secret blast radius minimal
+          # (original Omar P2 secrets finding). If OPENAI_API_KEY is unset the
+          # input expands empty and the gate relies solely on the managed path.
           sentinelayer_managed_llm: "true"
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
           scan_mode: deep
           severity_gate: P2
           model: gpt-5.3-codex
