@@ -124,21 +124,6 @@ const emptyFields: LabelFields = {
 
 const samples: Sample[] = [
   {
-    id: "pass-bourbon",
-    name: "Passing bourbon",
-    trap: "Clean baseline",
-    expected: "PASS",
-    variant: "pass",
-    fields: {
-      brandName: "Old Forester",
-      classType: "Kentucky Straight Bourbon Whisky",
-      alcoholContent: "43% ABV",
-      netContents: "750 mL",
-      origin: "United States"
-    },
-    imagePath: "/fixtures/pass_bourbon.png"
-  },
-  {
     id: "title-case-warning",
     name: "Title-case warning",
     trap: "Warning canon",
@@ -152,21 +137,6 @@ const samples: Sample[] = [
       origin: "United States"
     },
     imagePath: "/fixtures/warning_title_case.png"
-  },
-  {
-    id: "proof-only",
-    name: "90-proof label",
-    trap: "ABV conversion",
-    expected: "PASS",
-    variant: "pass",
-    fields: {
-      brandName: "Stone's Throw",
-      classType: "Bourbon Whisky",
-      alcoholContent: "45% ABV",
-      netContents: "750 mL",
-      origin: "United States"
-    },
-    imagePath: "/fixtures/proof_only_equivalent.png"
   },
   {
     id: "abv-mismatch",
@@ -187,8 +157,8 @@ const samples: Sample[] = [
     id: "import-origin",
     name: "Import origin gap",
     trap: "Country of origin",
-    expected: "FAIL",
-    variant: "fail",
+    expected: "NEEDS_REVIEW",
+    variant: "review",
     fields: {
       brandName: "Highland Sample",
       classType: "Single Malt Whisky",
