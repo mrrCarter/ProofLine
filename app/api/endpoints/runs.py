@@ -1,7 +1,6 @@
 import asyncio
 import hashlib
 import json
-import re
 import time
 import uuid
 from typing import Any, Optional
@@ -11,8 +10,8 @@ from fastapi.responses import StreamingResponse
 
 from app.core.fsm import RuntimeState
 from app.schemas.error import ErrorResponse, error_detail
-from app.schemas.finding import Evidence, Finding, FindingSeverity, FindingStatus
 from app.services.factory import get_vision_provider
+from app.services.rules import RuleEngine
 
 router = APIRouter()
 
@@ -80,10 +79,6 @@ def _parse_application_data(raw: str, request_id: str) -> dict[str, Any]:
             request_id,
         )
     return parsed
-
-
-def _normalize_text(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
 
 
 def _application_brand(application_data: dict[str, Any]) -> Optional[str]:
@@ -182,32 +177,17 @@ async def _execute_skeleton_pipeline(run: dict[str, Any]) -> None:
 
     rules_started = time.monotonic()
     brand = _application_brand(run["applicationData"])
-    all_text = " ".join(item.text for item in ocr.results)
-    normalized_brand = _normalize_text(brand or "")
-    normalized_label = _normalize_text(all_text)
-    brand_pass = bool(normalized_brand and normalized_brand in normalized_label)
-    finding = Finding(
-        ruleId="BRAND_NAME_MATCH",
-        severity=FindingSeverity.HIGH,
-        status=FindingStatus.PASS if brand_pass else FindingStatus.FAIL,
-        expected={"raw": brand, "normalized": normalized_brand},
-        observed={"raw": all_text, "normalized": normalized_label},
-        confidence=0.95 if brand_pass else 0.8,
-        evidence=Evidence(
-            text=all_text,
-            bbox=ocr.results[0].bbox.vertices if ocr.results else None,
-            provider=provider_name,
-        ),
-        explanation=(
-            "Application brand was found in mock OCR text."
-            if brand_pass
-            else "Application brand was not found in mock OCR text."
-        ),
-        remediation=None if brand_pass else "Confirm the application brand matches the label.",
+    rule_context = dict(run["applicationData"])
+    rule_context["ocr_provider"] = provider_name
+    rule_engine = RuleEngine()
+    rule_result = rule_engine.evaluate_with_verdict(
+        [_model_dump(item) for item in ocr.results],
+        rule_context,
     )
-    finding_payload = _finding_payload(finding)
+    finding_payloads = [_finding_payload(finding) for finding in rule_result["findings"]]
 
-    run["findings"] = [finding_payload]
+    run["findings"] = finding_payloads
+    run["rulePack"] = rule_result["rulePack"]
     run["state"] = RuntimeState.RULED
     run["timings"]["rulesMs"] = int((time.monotonic() - rules_started) * 1000)
     _append_event(
@@ -215,18 +195,19 @@ async def _execute_skeleton_pipeline(run: dict[str, Any]) -> None:
         "field.extracted",
         {"runId": run["runId"], "field": "brandName", "value": brand},
     )
-    _append_event(
-        run,
-        "rule.evaluated",
-        {
-            "runId": run["runId"],
-            "ruleId": "BRAND_NAME_MATCH",
-            "status": finding_payload["status"],
-            "latencyMs": run["timings"]["rulesMs"],
-        },
-    )
+    for finding_payload in finding_payloads:
+        _append_event(
+            run,
+            "rule.evaluated",
+            {
+                "runId": run["runId"],
+                "ruleId": finding_payload["ruleId"],
+                "status": finding_payload["status"],
+                "latencyMs": run["timings"]["rulesMs"],
+            },
+        )
 
-    verdict = RuntimeState.PASS if brand_pass else RuntimeState.FAIL
+    verdict = RuntimeState(rule_result["verdict"])
     run["state"] = verdict
     run["verdict"] = verdict.value
     run["latencyMs"] = int((time.monotonic() - started) * 1000)
@@ -252,6 +233,7 @@ def _public_run(run: dict[str, Any]) -> dict[str, Any]:
         "state": run["state"].value if isinstance(run["state"], RuntimeState) else run["state"],
         "verdict": run.get("verdict"),
         "findings": run.get("findings", []),
+        "rulePack": run.get("rulePack"),
         "latencyMs": run.get("latencyMs"),
         "timings": run.get("timings", {}),
         "receiptRef": None,
