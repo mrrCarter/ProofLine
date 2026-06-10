@@ -1,0 +1,72 @@
+{
+  "aliases": {
+    "pass_bourbon": "pass_bourbon",
+    "old_forester_bourbon": "pass_bourbon"
+  },
+  "hashes": {
+    "2eff6d578e53d0ca486710f1ff87423a21e4d606074c20a7efb410671351943e": "pass_bourbon",
+    "4b5c5c92cec3b23e6a294fc0eea43234ef5126c5a64f4c6c531ac8430ab0b844": "pass_bourbon"
+  },
+  "fixtures": {
+    "pass_bourbon": {
+      "metadata": {
+        "artifact": "pass_bourbon.png",
+        "artifactSha256": "2eff6d578e53d0ca486710f1ff87423a21e4d606074c20a7efb410671351943e",
+        "fixtureId": "pass_bourbon",
+        "labelType": "spirits",
+        "sampleName": "old_forester_bourbon"
+      },
+      "readability_score": 0.96,
+      "results": [
+        {
+          "text": "OLD FORESTER",
+          "confidence": 0.98,
+          "bbox": {
+            "vertices": [
+              [160, 74],
+              [740, 74],
+              [740, 132],
+              [160, 132]
+            ]
+          }
+        },
+        {
+          "text": "KENTUCKY STRAIGHT BOURBON WHISKY",
+          "confidence": 0.95,
+          "bbox": {
+            "vertices": [
+              [230, 235],
+              [670, 235],
+              [670, 316],
+              [230, 316]
+            ]
+          }
+        },
+        {
+          "text": "43% ALC/VOL (86 PROOF)",
+          "confidence": 0.99,
+          "bbox": {
+            "vertices": [
+              [270, 354],
+              [630, 354],
+              [630, 384],
+              [270, 384]
+            ]
+          }
+        },
+        {
+          "text": "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.",
+          "confidence": 0.92,
+          "bbox": {
+            "vertices": [
+              [85, 512],
+              [815, 512],
+              [815, 580],
+              [85, 580]
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

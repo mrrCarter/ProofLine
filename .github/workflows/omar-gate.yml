@@ -1,0 +1,283 @@
+name: Omar Gate
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+  # Post-merge / protected-branch trigger: re-run the gate on main so a
+  # deploy path off main is never outside Omar Gate coverage (Omar P2 ci/cd).
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      scan_mode:
+        description: Sentinelayer scan profile
+        required: false
+        default: deep
+        type: choice
+        options:
+          - baseline
+          - deep
+          - audit
+          - full-depth
+      severity_gate:
+        description: Severity threshold that blocks merge
+        required: false
+        default: P2
+        type: choice
+        options:
+          - P0
+          - P1
+          - P2
+          - none
+      p2_max_allowed:
+        description: Maximum allowed P2 findings
+        required: false
+        default: "5"
+        type: string
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+  id-token: write
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.14"
+      - name: Install Python dependencies
+        shell: bash
+        run: |-
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install --no-cache-dir --require-hashes -r requirements.txt
+      - name: Syntax lint
+        shell: bash
+        run: |-
+          set -euo pipefail
+          python -m compileall -q app main.py tests
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.14"
+      - name: Install Python test dependencies
+        shell: bash
+        run: |-
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install --no-cache-dir --require-hashes -r requirements.txt
+          python -m pip install --no-cache-dir pytest==9.0.3
+      - name: Run Python tests
+        shell: bash
+        env:
+          PROOFLINE_ENV: test
+          PROOFLINE_ALLOW_EPHEMERAL_RECEIPTS: "true"
+          PROOFLINE_PUBLIC_KEY_ID: proofline-test-ephemeral
+          VISION_PROVIDER: mock
+        run: |-
+          set -euo pipefail
+          python -m pytest -q
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs:
+      - lint
+      - test
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Build container image
+        shell: bash
+        run: |-
+          set -euo pipefail
+          docker build --iidfile proofline-image.iid .
+          {
+            echo "commit=${GITHUB_SHA}"
+            echo "image_id=$(cat proofline-image.iid)"
+          } > proofline-image-manifest.txt
+      - name: Run container OCR latency gate
+        shell: bash
+        run: |-
+          set -euo pipefail
+          image_id="$(cat proofline-image.iid)"
+          docker run --rm --user root \
+            -e PROOFLINE_ENV=test \
+            -e PROOFLINE_ALLOW_EPHEMERAL_RECEIPTS=true \
+            -e PROOFLINE_PUBLIC_KEY_ID=proofline-test-ephemeral \
+            --entrypoint sh \
+            "${image_id}" \
+            -c "python -m pip install --no-cache-dir pytest==9.0.3 && python -m pytest -q -m latency"
+      - name: Upload image manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: proofline-image-${{ github.sha }}
+          path: proofline-image-manifest.txt
+
+  omar_gate:
+    name: Omar Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs:
+      - build
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Validate Sentinelayer token
+        shell: bash
+        env:
+          SENTINELAYER_TOKEN: ${{ secrets.SENTINELAYER_TOKEN }}
+        run: |-
+          set -euo pipefail
+          # Fail CLOSED: a merge gate that passes when it cannot run is fail-open.
+          # The secret is configured for this repo, so a missing token means
+          # misconfiguration (or an untrusted fork that cannot access secrets) and
+          # must BLOCK the merge rather than pass vacuously. A maintainer re-runs
+          # from a trusted branch after fixing the secret.
+          if [ -z "${SENTINELAYER_TOKEN}" ]; then
+            echo "::error::SENTINELAYER_TOKEN is not available — Omar Gate cannot run, failing closed."
+            echo "Set it with: gh secret set SENTINELAYER_TOKEN --repo <owner>/<repo>"
+            echo "Local equivalent: npx sentinelayer-cli@0.22.0 /omargate deep --path ."
+            exit 1
+          fi
+      - name: Resolve Omar Gate policy
+        id: policy
+        shell: bash
+        env:
+          RAW_SCAN_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.scan_mode || 'deep' }}
+          RAW_SEVERITY_GATE: ${{ github.event_name == 'workflow_dispatch' && inputs.severity_gate || 'P2' }}
+          RAW_P2_MAX: ${{ github.event_name == 'workflow_dispatch' && inputs.p2_max_allowed || '5' }}
+        run: |-
+          set -euo pipefail
+          scan_mode="${RAW_SCAN_MODE:-deep}"
+          severity_gate="${RAW_SEVERITY_GATE:-P2}"
+          p2_max="${RAW_P2_MAX:-5}"
+
+          case "${scan_mode}" in
+            baseline|deep|audit|full-depth) ;;
+            *) echo "::error::Invalid scan_mode '${scan_mode}'"; exit 1 ;;
+          esac
+          case "${severity_gate}" in
+            P0|P1|P2|none) ;;
+            *) echo "::error::Invalid severity_gate '${severity_gate}'"; exit 1 ;;
+          esac
+          if ! [[ "${p2_max}" =~ ^[0-9]+$ ]]; then
+            echo "::error::p2_max_allowed must be a non-negative integer"
+            exit 1
+          fi
+
+          {
+            echo "scan_mode=${scan_mode}"
+            echo "severity_gate=${severity_gate}"
+            echo "p2_max_allowed=${p2_max}"
+          } >> "${GITHUB_OUTPUT}"
+          {
+            echo "## Effective Omar Gate Policy"
+            echo "- scan_mode: \`${scan_mode}\`"
+            echo "- severity_gate: \`${severity_gate}\`"
+            echo "- p2_max_allowed: \`${p2_max}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+      - name: Run Omar Gate
+        id: omar
+        uses: mrrCarter/sentinelayer-v1-action@03d7369cba7de2e9f15b959275c982111f0ee493
+        with:
+          github_token: ${{ github.token }}
+          sentinelayer_token: ${{ secrets.SENTINELAYER_TOKEN }}
+          # Managed LLM (via SENTINELAYER_TOKEN) is the primary path. A SINGLE
+          # provider key (OPENAI_API_KEY — the model the scan uses, gpt-5.3-codex)
+          # is passed as the fallback so the gate stays operable when the managed
+          # daily quota is exhausted. GOOGLE_API_KEY is intentionally NOT passed:
+          # one key is the minimum needed, keeping secret blast radius minimal
+          # (original Omar P2 secrets finding). If OPENAI_API_KEY is unset the
+          # input expands empty and the gate relies solely on the managed path.
+          sentinelayer_managed_llm: "true"
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          scan_mode: ${{ steps.policy.outputs.scan_mode }}
+          severity_gate: ${{ steps.policy.outputs.severity_gate }}
+          model: gpt-5.3-codex
+          codex_model: gpt-5.3-codex
+          model_fallback: gemini-2.5-flash
+          llm_failure_policy: block
+      - name: Enforce merge thresholds
+        shell: bash
+        env:
+          P0_COUNT: ${{ steps.omar.outputs.p0_count || '0' }}
+          P1_COUNT: ${{ steps.omar.outputs.p1_count || '0' }}
+          P2_COUNT: ${{ steps.omar.outputs.p2_count || '0' }}
+          SEVERITY_GATE: ${{ steps.policy.outputs.severity_gate }}
+          P2_MAX: ${{ steps.policy.outputs.p2_max_allowed }}
+        run: |-
+          set -euo pipefail
+          p0="$(echo "${P0_COUNT}" | tr -d '\r' | xargs)"
+          p1="$(echo "${P1_COUNT}" | tr -d '\r' | xargs)"
+          p2="$(echo "${P2_COUNT}" | tr -d '\r' | xargs)"
+          gate="$(echo "${SEVERITY_GATE}" | tr -d '\r' | xargs)"
+          p2_max="$(echo "${P2_MAX}" | tr -d '\r' | xargs)"
+          case "${gate}" in
+            none)
+              echo "Omar Gate severity_gate=none; threshold enforcement skipped."
+              ;;
+            P0)
+              if [ "${p0:-0}" -gt 0 ]; then
+                echo "::error::Omar Gate blocked: P0=${p0}"
+                exit 1
+              fi
+              ;;
+            P1)
+              if [ "${p0:-0}" -gt 0 ] || [ "${p1:-0}" -gt 0 ]; then
+                echo "::error::Omar Gate blocked: P0=${p0}, P1=${p1}"
+                exit 1
+              fi
+              ;;
+            P2)
+              if [ "${p0:-0}" -gt 0 ] || [ "${p1:-0}" -gt 0 ]; then
+                echo "::error::Omar Gate blocked: P0=${p0}, P1=${p1}"
+                exit 1
+              fi
+              if [ "${p2:-0}" -gt "${p2_max:-5}" ]; then
+                echo "::error::Omar Gate blocked: P2=${p2} exceeds max ${p2_max}"
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::Invalid severity gate '${gate}'"
+              exit 1
+              ;;
+          esac
+      - name: Omar summary
+        shell: bash
+        run: |-
+          echo "## Omar Gate" >> "$GITHUB_STEP_SUMMARY"
+          echo "- gate: \`${{ steps.omar.outputs.gate_status }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- findings: P0=${{ steps.omar.outputs.p0_count }} P1=${{ steps.omar.outputs.p1_count }} P2=${{ steps.omar.outputs.p2_count }} P3=${{ steps.omar.outputs.p3_count }}" >> "$GITHUB_STEP_SUMMARY"

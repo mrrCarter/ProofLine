@@ -1,0 +1,52 @@
+id: wine-v1
+name: Wine Rule Pack
+version: "1.0.0"
+commodity: wine
+rules:
+  - id: BRAND_NAME_MATCH
+    name: Brand Name Match
+    severity: HIGH
+    threshold: 0.93
+    description: Verifies that the brand name on the label matches the expected brand name.
+  - id: CLASS_TYPE_MATCH
+    name: Class And Type Match
+    severity: HIGH
+    threshold: 0.93
+    description: Verifies that wine class/type text matches after bounded normalization.
+  - id: ALCOHOL_CONTENT_MATCH
+    name: Alcohol Content Match
+    severity: HIGH
+    toleranceAbv: 0.05
+    description: Compares stated alcohol by volume.
+  - id: NET_CONTENTS_MATCH
+    name: Net Contents Match
+    severity: HIGH
+    toleranceMl: 1.0
+    description: Normalizes mL, cL, and L before comparison.
+  - id: NAME_ADDRESS_PRESENT
+    name: Producer Or Bottler Name And Address Present
+    severity: HIGH
+    description: Checks expected producer or bottler name plus city/state signals.
+  - id: COUNTRY_OF_ORIGIN_IF_IMPORT
+    name: Country Of Origin If Imported
+    severity: HIGH
+    description: Requires country of origin when application context marks the product imported.
+  - id: GOVERNMENT_WARNING_PRESENT
+    name: Government Warning Present
+    severity: HIGH
+    description: Detects the required government warning anchor on the label.
+  - id: GOVERNMENT_WARNING_EXACT_TEXT
+    name: Government Warning Exact Text
+    severity: HIGH
+    source: https://www.ecfr.gov/current/title-27/chapter-I/subchapter-A/part-16/subpart-C/section-16.21
+    description: Compares the warning statement to the pinned 27 CFR 16.21 text with whitespace-collapse-only normalization.
+  - id: GOVERNMENT_WARNING_FORMAT_SIGNAL
+    name: Government Warning Format Signal
+    severity: MEDIUM
+    source: https://www.ecfr.gov/current/title-27/chapter-I/subchapter-A/part-16/subpart-C/section-16.22
+    description: Reports bold/size signals honestly; format uncertainty routes to NEEDS_REVIEW.
+  - id: IMAGE_READABILITY
+    name: Image Readability
+    severity: HIGH
+    floor: 0.65
+    description: Routes low-confidence or low-readability inputs to UNREADABLE instead of confident pass.

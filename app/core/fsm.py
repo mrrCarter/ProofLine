@@ -1,0 +1,14 @@
+from enum import Enum
+
+class RuntimeState(str, Enum):
+    RECEIVED = "RECEIVED"
+    PREPROCESSED = "PREPROCESSED"
+    EXTRACTED = "EXTRACTED"
+    RULED = "RULED"
+    PASS = "PASS"
+    FAIL = "FAIL"
+    NEEDS_REVIEW = "NEEDS_REVIEW"
+    UNREADABLE = "UNREADABLE"
+    ERROR = "ERROR"
+    ESCALATED = "ESCALATED"
+    ADJUDICATED = "ADJUDICATED"
