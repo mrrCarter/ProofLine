@@ -34,6 +34,9 @@ TERMINAL_STATES = {
     RuntimeState.UNREADABLE,
     RuntimeState.ERROR,
 }
+EVENT_STREAM_MAX_IDLE_POLLS = 1200
+EVENT_STREAM_INITIAL_BACKOFF_SECONDS = 0.05
+EVENT_STREAM_MAX_BACKOFF_SECONDS = 0.25
 
 # In-memory storage is deliberately scoped to the prototype slice.
 runs: dict[str, dict[str, Any]] = {}
@@ -147,6 +150,18 @@ def _append_event(run: dict[str, Any], event: str, data: dict[str, Any]) -> None
 
 def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n"
+
+
+def _state_value(state: Any) -> str:
+    if isinstance(state, RuntimeState):
+        return state.value
+    return str(state)
+
+
+def _next_event_stream_backoff(current: float) -> float:
+    if EVENT_STREAM_MAX_BACKOFF_SECONDS <= 0:
+        return 0.0
+    return min(EVENT_STREAM_MAX_BACKOFF_SECONDS, max(EVENT_STREAM_INITIAL_BACKOFF_SECONDS, current * 2))
 
 
 def _model_dump(value: Any) -> dict[str, Any]:
@@ -514,15 +529,33 @@ async def get_run_events(request: Request, run_id: str):
 
     async def event_generator():
         sent = 0
-        while True:
+        idle_polls = 0
+        backoff_seconds = EVENT_STREAM_INITIAL_BACKOFF_SECONDS
+        while idle_polls < EVENT_STREAM_MAX_IDLE_POLLS:
+            emitted = False
             while sent < len(run["events"]):
                 event = run["events"][sent]
                 sent += 1
+                emitted = True
                 yield _sse(event["event"], event["data"])
+            if emitted:
+                idle_polls = 0
+                backoff_seconds = EVENT_STREAM_INITIAL_BACKOFF_SECONDS
 
             if _terminal_state(run):
                 return
 
-            await asyncio.sleep(0.05)
+            idle_polls += 1
+            await asyncio.sleep(min(backoff_seconds, EVENT_STREAM_MAX_BACKOFF_SECONDS))
+            backoff_seconds = _next_event_stream_backoff(backoff_seconds)
+
+        yield _sse(
+            "run.stream.timeout",
+            {
+                "runId": run_id,
+                "state": _state_value(run["state"]),
+                "maxAttempts": EVENT_STREAM_MAX_IDLE_POLLS,
+            },
+        )
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")

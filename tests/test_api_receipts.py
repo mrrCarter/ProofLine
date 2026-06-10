@@ -204,6 +204,32 @@ def test_ui_origin_field_is_normalized_for_country_rule():
     assert findings["COUNTRY_OF_ORIGIN_IF_IMPORT"]["expected"]["imported"] is True
 
 
+def test_run_events_stream_times_out_for_stalled_nonterminal_run(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(run_endpoint, "EVENT_STREAM_MAX_IDLE_POLLS", 1)
+    monkeypatch.setattr(run_endpoint, "EVENT_STREAM_INITIAL_BACKOFF_SECONDS", 0.0)
+    monkeypatch.setattr(run_endpoint, "EVENT_STREAM_MAX_BACKOFF_SECONDS", 0.0)
+    run_endpoint.runs["run-stalled"] = {
+        "runId": "run-stalled",
+        "requestId": "request-stalled",
+        "artifactSha256": "0" * 64,
+        "applicationData": {},
+        "imageBytes": b"",
+        "contentType": "image/png",
+        "state": run_endpoint.RuntimeState.RECEIVED,
+        "events": [{"event": "run.created", "data": {"runId": "run-stalled", "artifactSha256": "0" * 64}}],
+        "timings": {},
+        "rulePack": "spirits-v1@1.0.0",
+        "startedAtMonotonic": time.monotonic(),
+    }
+
+    events = _client().get("/api/runs/run-stalled/events")
+
+    assert events.status_code == 200
+    assert "event: run.created" in events.text
+    assert "event: run.stream.timeout" in events.text
+    assert '"maxAttempts":1' in events.text
+
+
 def test_commodity_selects_rule_pack():
     client = _client()
     created = _post_bourbon(client)

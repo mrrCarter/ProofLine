@@ -101,6 +101,26 @@ def test_batch_events_stream_to_completion():
     assert "event: batch.completed" in events.text
 
 
+def test_batch_events_stream_times_out_for_stalled_nonterminal_batch(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(run_endpoint, "EVENT_STREAM_MAX_IDLE_POLLS", 1)
+    monkeypatch.setattr(run_endpoint, "EVENT_STREAM_INITIAL_BACKOFF_SECONDS", 0.0)
+    monkeypatch.setattr(run_endpoint, "EVENT_STREAM_MAX_BACKOFF_SECONDS", 0.0)
+    batch_endpoint.batches["batch-stalled"] = {
+        "batchId": "batch-stalled",
+        "requestId": "request-stalled",
+        "state": "RUNNING",
+        "items": [],
+        "events": [{"event": "batch.created", "data": {"batchId": "batch-stalled", "count": 0}}],
+    }
+
+    events = _client().get("/api/batches/batch-stalled/events")
+
+    assert events.status_code == 200
+    assert "event: batch.created" in events.text
+    assert "event: batch.stream.timeout" in events.text
+    assert '"maxAttempts":1' in events.text
+
+
 def test_batch_accepts_zip_upload():
     client = _client()
     fixture = Path("app/services/fixtures/pass_bourbon.png").read_bytes()

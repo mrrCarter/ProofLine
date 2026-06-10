@@ -441,14 +441,32 @@ async def get_batch_events(request: Request, batch_id: str):
 
     async def event_generator():
         sent = 0
-        while True:
+        idle_polls = 0
+        backoff_seconds = run_endpoint.EVENT_STREAM_INITIAL_BACKOFF_SECONDS
+        while idle_polls < run_endpoint.EVENT_STREAM_MAX_IDLE_POLLS:
+            emitted = False
             while sent < len(batch["events"]):
                 event = batch["events"][sent]
                 sent += 1
+                emitted = True
                 yield run_endpoint._sse(event["event"], event["data"])
+            if emitted:
+                idle_polls = 0
+                backoff_seconds = run_endpoint.EVENT_STREAM_INITIAL_BACKOFF_SECONDS
             if batch["state"] == "COMPLETED":
                 return
-            await asyncio.sleep(0.05)
+            idle_polls += 1
+            await asyncio.sleep(min(backoff_seconds, run_endpoint.EVENT_STREAM_MAX_BACKOFF_SECONDS))
+            backoff_seconds = run_endpoint._next_event_stream_backoff(backoff_seconds)
+
+        yield run_endpoint._sse(
+            "batch.stream.timeout",
+            {
+                "batchId": batch_id,
+                "state": str(batch["state"]),
+                "maxAttempts": run_endpoint.EVENT_STREAM_MAX_IDLE_POLLS,
+            },
+        )
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
