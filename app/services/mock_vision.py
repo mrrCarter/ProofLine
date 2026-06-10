@@ -1,7 +1,7 @@
-import json
 import hashlib
+import json
 import os
-from typing import Dict, Any, Optional
+from typing import Any, Optional
 
 from .vision_provider import VisionProvider, VisionResponse, OCRResult, BoundingBox
 
@@ -16,11 +16,24 @@ class MockVisionProvider(VisionProvider):
         self.fixture_path = fixture_path
         self.fixtures = self._load_fixtures()
 
-    def _load_fixtures(self) -> Dict[str, Any]:
+    def _load_fixtures(self) -> dict[str, Any]:
         if os.path.exists(self.fixture_path):
             with open(self.fixture_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         return {}
+
+    def _fixture_for_hash(self, artifact_hash: str) -> tuple[Optional[str], Optional[dict[str, Any]]]:
+        if "fixtures" not in self.fixtures:
+            fixture = self.fixtures.get(artifact_hash)
+            return artifact_hash, fixture if isinstance(fixture, dict) else None
+
+        fixture_id = self.fixtures.get("hashes", {}).get(artifact_hash)
+        fixture_id = fixture_id or self.fixtures.get("aliases", {}).get(artifact_hash)
+        if not fixture_id:
+            return None, None
+
+        fixture = self.fixtures.get("fixtures", {}).get(fixture_id)
+        return fixture_id, fixture if isinstance(fixture, dict) else None
 
     async def process_image(
         self,
@@ -33,29 +46,23 @@ class MockVisionProvider(VisionProvider):
         if not artifact_hash:
             artifact_hash = hashlib.sha256(image_bytes).hexdigest()
 
-        fixture = self.fixtures.get(artifact_hash)
+        fixture_id, fixture = self._fixture_for_hash(artifact_hash)
 
         if not fixture:
-            # Fallback: if artifact_hash is a known fixture name, use its hash
-            # This is useful for testing with names like "pass_bourbon"
-            name_to_hash = {
-                "pass_bourbon": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
-            }
-            if artifact_hash in name_to_hash:
-                fixture = self.fixtures.get(name_to_hash[artifact_hash])
-
-        if not fixture:
-            # Generic fallback for unknown hashes
             return VisionResponse(
                 results=[
                     OCRResult(
                         text="MOCK OCR TEXT",
                         confidence=0.5,
-                        bbox=BoundingBox(vertices=[[0, 0], [10, 0], [10, 10], [0, 10]])
+                        bbox=BoundingBox(vertices=[[0, 0], [10, 0], [10, 10], [0, 10]]),
                     )
                 ],
                 readability_score=0.5,
-                metadata={"status": "mock_unknown_hash", "hash": artifact_hash}
+                metadata={
+                    "provider": "mock",
+                    "status": "mock_unknown_hash",
+                    "hash": artifact_hash,
+                },
             )
 
         results = [
@@ -67,11 +74,16 @@ class MockVisionProvider(VisionProvider):
             for r in fixture["results"]
         ]
 
+        metadata = {
+            "provider": "mock",
+            "status": "mock_success",
+            "hash": artifact_hash,
+            "fixtureId": fixture_id or artifact_hash,
+        }
+        metadata.update(fixture.get("metadata", {}))
+
         return VisionResponse(
             results=results,
             readability_score=fixture["readability_score"],
-            metadata=fixture.get(
-                "metadata",
-                {"status": "mock_success", "hash": artifact_hash, "provider": "mock"},
-            ),
+            metadata=metadata,
         )

@@ -1,55 +1,71 @@
 {
-  "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08": {
-    "results": [
-      {
-        "text": "OLD FORESTER",
-        "confidence": 0.98,
-        "bbox": {
-          "vertices": [
-            [100, 100],
-            [300, 100],
-            [300, 150],
-            [100, 150]
-          ]
-        }
+  "aliases": {
+    "pass_bourbon": "pass_bourbon",
+    "old_forester_bourbon": "pass_bourbon"
+  },
+  "hashes": {
+    "62432147ca99358d1ae63c3589043444ae8c79937d1b13639c2e4cb774454d15": "pass_bourbon",
+    "6b7fa434f92a8b80aab02d9bf1a12e49ffcae424e4013a1c4f68b67e3d2bbcd0": "pass_bourbon",
+    "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08": "pass_bourbon"
+  },
+  "fixtures": {
+    "pass_bourbon": {
+      "metadata": {
+        "fixtureId": "pass_bourbon",
+        "labelType": "spirits",
+        "sampleName": "old_forester_bourbon"
       },
-      {
-        "text": "KENTUCKY STRAIGHT BOURBON WHISKY",
-        "confidence": 0.95,
-        "bbox": {
-          "vertices": [
-            [100, 160],
-            [400, 160],
-            [400, 200],
-            [100, 200]
-          ]
+      "readability_score": 0.96,
+      "results": [
+        {
+          "text": "OLD FORESTER",
+          "confidence": 0.98,
+          "bbox": {
+            "vertices": [
+              [100, 100],
+              [300, 100],
+              [300, 150],
+              [100, 150]
+            ]
+          }
+        },
+        {
+          "text": "KENTUCKY STRAIGHT BOURBON WHISKY",
+          "confidence": 0.95,
+          "bbox": {
+            "vertices": [
+              [100, 160],
+              [400, 160],
+              [400, 200],
+              [100, 200]
+            ]
+          }
+        },
+        {
+          "text": "43% ALC/VOL (86 PROOF)",
+          "confidence": 0.99,
+          "bbox": {
+            "vertices": [
+              [100, 210],
+              [250, 210],
+              [250, 230],
+              [100, 230]
+            ]
+          }
+        },
+        {
+          "text": "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.",
+          "confidence": 0.92,
+          "bbox": {
+            "vertices": [
+              [100, 500],
+              [800, 500],
+              [800, 600],
+              [100, 600]
+            ]
+          }
         }
-      },
-      {
-        "text": "43% ALC/VOL (86 PROOF)",
-        "confidence": 0.99,
-        "bbox": {
-          "vertices": [
-            [100, 210],
-            [250, 210],
-            [250, 230],
-            [100, 230]
-          ]
-        }
-      },
-      {
-        "text": "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.",
-        "confidence": 0.92,
-        "bbox": {
-          "vertices": [
-            [100, 500],
-            [800, 500],
-            [800, 600],
-            [100, 600]
-          ]
-        }
-      }
-    ],
-    "readability_score": 0.96
+      ]
+    }
   }
 }
