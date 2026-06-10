@@ -312,6 +312,11 @@ async def _execute_skeleton_pipeline(run: dict[str, Any]) -> None:
     rules_started = time.monotonic()
     brand = _application_brand(run["applicationData"])
     rule_context = dict(run["applicationData"])
+    for reserved_key in ("_pipelineComputed", "pipelineComputed", "pipelineContext"):
+        rule_context.pop(reserved_key, None)
+    pipeline_context = ocr.metadata.get("pipelineContext")
+    if isinstance(pipeline_context, dict):
+        rule_context["pipelineContext"] = pipeline_context
     rule_context["ocr_provider"] = provider_name
     rule_engine = _rule_engine_for(rule_context)
     rule_result = rule_engine.evaluate_with_verdict(

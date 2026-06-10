@@ -245,7 +245,7 @@ def test_warning_format_computed_likely_passes():
     engine = RuleEngine()
     findings = engine.evaluate(
         _ocr(GOVERNMENT_WARNING_TEXT),
-        {"pipelineComputed": {"warningFormat": {"boldSignal": "likely", "boldConfidence": 0.91}}},
+        {"pipelineContext": {"warningFormat": {"boldSignal": "likely", "boldConfidence": 0.91}}},
     )
     finding = _finding(findings, "GOVERNMENT_WARNING_FORMAT_SIGNAL")
 

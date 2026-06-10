@@ -297,7 +297,11 @@ class RuleEngine:
         }
 
     def _computed_warning_format_signal(self, context: dict[str, Any]) -> dict[str, Any]:
-        pipeline_context = context.get("_pipelineComputed") or context.get("pipelineComputed")
+        pipeline_context = (
+            context.get("_pipelineComputed")
+            or context.get("pipelineComputed")
+            or context.get("pipelineContext")
+        )
         format_context = _mapping_value(pipeline_context, ("warningFormat", "warning_format"))
         signal = _mapping_value(
             format_context,
