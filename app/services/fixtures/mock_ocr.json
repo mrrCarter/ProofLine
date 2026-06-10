@@ -4,13 +4,13 @@
     "old_forester_bourbon": "pass_bourbon"
   },
   "hashes": {
-    "62432147ca99358d1ae63c3589043444ae8c79937d1b13639c2e4cb774454d15": "pass_bourbon",
-    "6b7fa434f92a8b80aab02d9bf1a12e49ffcae424e4013a1c4f68b67e3d2bbcd0": "pass_bourbon",
-    "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08": "pass_bourbon"
+    "2eff6d578e53d0ca486710f1ff87423a21e4d606074c20a7efb410671351943e": "pass_bourbon"
   },
   "fixtures": {
     "pass_bourbon": {
       "metadata": {
+        "artifact": "pass_bourbon.png",
+        "artifactSha256": "2eff6d578e53d0ca486710f1ff87423a21e4d606074c20a7efb410671351943e",
         "fixtureId": "pass_bourbon",
         "labelType": "spirits",
         "sampleName": "old_forester_bourbon"
@@ -22,10 +22,10 @@
           "confidence": 0.98,
           "bbox": {
             "vertices": [
-              [100, 100],
-              [300, 100],
-              [300, 150],
-              [100, 150]
+              [160, 74],
+              [740, 74],
+              [740, 132],
+              [160, 132]
             ]
           }
         },
@@ -34,10 +34,10 @@
           "confidence": 0.95,
           "bbox": {
             "vertices": [
-              [100, 160],
-              [400, 160],
-              [400, 200],
-              [100, 200]
+              [230, 235],
+              [670, 235],
+              [670, 316],
+              [230, 316]
             ]
           }
         },
@@ -46,10 +46,10 @@
           "confidence": 0.99,
           "bbox": {
             "vertices": [
-              [100, 210],
-              [250, 210],
-              [250, 230],
-              [100, 230]
+              [270, 354],
+              [630, 354],
+              [630, 384],
+              [270, 384]
             ]
           }
         },
@@ -58,10 +58,10 @@
           "confidence": 0.92,
           "bbox": {
             "vertices": [
-              [100, 500],
-              [800, 500],
-              [800, 600],
-              [100, 600]
+              [85, 512],
+              [815, 512],
+              [815, 580],
+              [85, 580]
             ]
           }
         }

@@ -28,6 +28,7 @@ class MockVisionProvider(VisionProvider):
             return artifact_hash, fixture if isinstance(fixture, dict) else None
 
         fixture_id = self.fixtures.get("hashes", {}).get(artifact_hash)
+        # HTTP uploads always pass the real sha256; aliases keep direct mock/unit calls readable.
         fixture_id = fixture_id or self.fixtures.get("aliases", {}).get(artifact_hash)
         if not fixture_id:
             return None, None
