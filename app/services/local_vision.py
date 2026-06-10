@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from PIL import Image
 
+from .format_signal import compute_region_readability_score, compute_warning_format_signal
 from .preprocess import PreprocessConfig, PreprocessError, preprocess_image
 from .vision_provider import BoundingBox, OCRResult, VisionProvider, VisionResponse
 
@@ -52,18 +53,6 @@ class LocalVisionProvider(VisionProvider):
             "normalizedHeight": preprocessed.height,
         }
 
-        if preprocessed.readability_score < self.preprocess_config.min_readability_score:
-            return VisionResponse(
-                results=[],
-                readability_score=preprocessed.readability_score,
-                metadata={
-                    **metadata,
-                    "status": "local_unreadable",
-                    "reason": "readability_score_below_floor",
-                    "floor": self.preprocess_config.min_readability_score,
-                },
-            )
-
         if not _tesseract_available():
             return VisionResponse(
                 results=[],
@@ -76,12 +65,31 @@ class LocalVisionProvider(VisionProvider):
             )
 
         results = _run_tesseract(preprocessed.image_bytes)
+        readability = compute_region_readability_score(preprocessed.readability_score, results)
+        warning_format = compute_warning_format_signal(preprocessed.image_bytes, results)
+        pipeline_context = {
+            **warning_format.flat_context(),
+            "warningFormat": warning_format.context_payload(),
+            "readabilityScore": readability.score,
+            "pipelineReadabilityScore": readability.score,
+            "globalReadabilityScore": readability.global_score,
+            "regionReadabilityScore": readability.region_score,
+        }
+        evidence_crops = [warning_format.warning_crop] if warning_format.warning_crop else []
+        status = "local_success" if results else "local_no_text"
+        if readability.score < self.preprocess_config.min_readability_score:
+            status = "local_unreadable"
         return VisionResponse(
             results=results,
-            readability_score=preprocessed.readability_score,
+            readability_score=readability.score,
             metadata={
                 **metadata,
-                "status": "local_success" if results else "local_no_text",
+                "status": status,
+                "readability": readability.metadata_payload(),
+                "readabilityFloor": self.preprocess_config.min_readability_score,
+                "pipelineContext": pipeline_context,
+                "warningFormat": warning_format.context_payload(),
+                "evidenceCrops": evidence_crops,
             },
         )
 
