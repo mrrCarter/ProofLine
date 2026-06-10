@@ -110,7 +110,6 @@ type EvidencePreview = {
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 const REQUEST_TIMEOUT_MS = 15_000;
 const RUN_WATCHDOG_MS = 15_000;
-const BATCH_DEMO_SIZE = 50;
 
 const PNG_1X1_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
@@ -224,19 +223,6 @@ const samples: Sample[] = [
       "GOVERNMENT WARNING: (1) ACCORDING TO THE SURGEON GENERAL, WOMEN SHOULD NOT DRINK ALCOHOLIC BEVERAGES DURING PREGNANCY."
     ]
   }
-];
-
-const batchScenarios = [
-  { name: "pass_bourbon", verdict: "PASS" as TerminalVerdict, findings: 0, latencyMs: 2180 },
-  { name: "abv_mismatch", verdict: "FAIL" as TerminalVerdict, findings: 2, latencyMs: 2310 },
-  { name: "brand_case_equivalent", verdict: "PASS" as TerminalVerdict, findings: 0, latencyMs: 2095 },
-  { name: "brand_material_mismatch", verdict: "FAIL" as TerminalVerdict, findings: 1, latencyMs: 2265 },
-  { name: "import_missing_origin", verdict: "FAIL" as TerminalVerdict, findings: 1, latencyMs: 2340 },
-  { name: "net_contents_unit_equiv", verdict: "PASS" as TerminalVerdict, findings: 0, latencyMs: 2050 },
-  { name: "proof_only_equivalent", verdict: "PASS" as TerminalVerdict, findings: 0, latencyMs: 2125 },
-  { name: "warning_missing", verdict: "FAIL" as TerminalVerdict, findings: 1, latencyMs: 2288 },
-  { name: "warning_small_font_signal", verdict: "NEEDS_REVIEW" as TerminalVerdict, findings: 1, latencyMs: 2410 },
-  { name: "glare_unreadable", verdict: "UNREADABLE" as TerminalVerdict, findings: 1, latencyMs: 2525 }
 ];
 
 const verdictMeta: Record<TerminalVerdict, { label: string; icon: typeof CheckCircle2; className: string }> = {
@@ -395,44 +381,6 @@ function normalizeBatchRows(payload: BatchResponse | Record<string, unknown>): B
   return rows.map(normalizeBatchRow);
 }
 
-function createQueuedRows(): BatchRow[] {
-  return Array.from({ length: BATCH_DEMO_SIZE }, (_, index) => {
-    const scenario = batchScenarios[index % batchScenarios.length];
-    return {
-      id: `demo-${index + 1}`,
-      fileName: `${scenario.name}_${String(index + 1).padStart(2, "0")}.png`,
-      status: "QUEUED",
-      verdict: null,
-      findings: 0,
-      latencyMs: null,
-      receiptRef: null,
-      runId: null
-    };
-  });
-}
-
-function createCompletedRows(): BatchRow[] {
-  return Array.from({ length: BATCH_DEMO_SIZE }, (_, index) => {
-    const scenario = batchScenarios[index % batchScenarios.length];
-    return {
-      id: `demo-${index + 1}`,
-      fileName: `${scenario.name}_${String(index + 1).padStart(2, "0")}.png`,
-      status: scenario.verdict,
-      verdict: scenario.verdict,
-      findings: scenario.findings,
-      latencyMs: scenario.latencyMs + (index % 5) * 24,
-      receiptRef: null,
-      runId: null
-    };
-  });
-}
-
-function delay(ms: number) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
-}
-
 async function labelImageFile(sample: Sample): Promise<File> {
   const canvas = document.createElement("canvas");
   canvas.width = 960;
@@ -588,6 +536,7 @@ function App() {
   }, [batchRows]);
 
   const batchProgress = batchCounts.total ? Math.round((batchCounts.completed / batchCounts.total) * 100) : 0;
+  const batchProgressMax = Math.max(batchCounts.total, 1);
 
   function updateField(key: keyof LabelFields, value: string) {
     setFields((current) => ({ ...current, [key]: value }));
@@ -874,49 +823,36 @@ function App() {
   }
 
   async function runDemoBatch() {
-    const queuedRows = createQueuedRows();
-    const completedRows = createCompletedRows();
     setMode("batch");
     setBatchError(null);
-    setBatchTimeline([{ id: "demo-start", event: "batch.created", data: { source: "ui-demo", count: BATCH_DEMO_SIZE } }]);
-    setBatchRows(queuedRows);
-    setBatchId("ui-demo-50");
+    setBatchTimeline([]);
+    setBatchRows([]);
+    setBatchId(null);
     setBatchExportUrl(null);
     setIsBatchRunning(true);
 
     try {
       const response = await fetchWithTimeout(`${API_BASE}/api/batches/demo`, { method: "POST" });
-      if (response.ok) {
-        const payload = (await response.json()) as BatchResponse;
-        setBatchId(payload.batchId);
-        setBatchExportUrl(payload.exportUrl ?? `/api/batches/${payload.batchId}/export.csv`);
-        const rows = normalizeBatchRows(payload);
-        if (rows.length) setBatchRows(rows);
-        if (payload.eventsUrl) {
-          connectBatchEvents(payload.batchId, payload.eventsUrl);
-          return;
-        }
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error?.message ?? "Server demo batch is not available.");
       }
-    } catch {
-      // Local demo rows keep the UI usable while the API batch slice is being implemented.
+
+      const payload = (await response.json()) as BatchResponse;
+      setBatchId(payload.batchId);
+      setBatchExportUrl(payload.exportUrl ?? `/api/batches/${payload.batchId}/export.csv`);
+      const rows = normalizeBatchRows(payload);
+      if (rows.length) setBatchRows(rows);
+      else await refreshBatch(payload.batchId);
+      if (payload.eventsUrl) {
+        connectBatchEvents(payload.batchId, payload.eventsUrl);
+        return;
+      }
+    } catch (caught) {
+      setBatchError(stringifyError(caught, "Server demo batch is not available."));
     }
 
-    for (let completed = 5; completed <= BATCH_DEMO_SIZE; completed += 5) {
-      await delay(110);
-      setBatchRows((current) =>
-        current.map((row, index) => (index < completed ? completedRows[index] : row.status === "QUEUED" ? { ...row, status: "RUNNING" } : row))
-      );
-      setBatchTimeline((current) => [
-        ...current,
-        { id: `demo-progress-${completed}`, event: "batch.item.completed", data: { completed, total: BATCH_DEMO_SIZE } }
-      ]);
-    }
-
-    setBatchRows(completedRows);
-    setBatchTimeline((current) => [
-      ...current,
-      { id: "demo-complete", event: "batch.completed", data: { completed: BATCH_DEMO_SIZE, source: "ui-demo" } }
-    ]);
     setIsBatchRunning(false);
   }
 
@@ -1165,7 +1101,7 @@ function App() {
                   Start batch
                 </button>
                 <button className="secondary-button" type="button" onClick={() => void runDemoBatch()} disabled={isBatchRunning}>
-                  Run 50-label demo
+                  Run server demo
                 </button>
               </div>
             </section>
@@ -1186,10 +1122,10 @@ function App() {
             <div>
               <p>Progress</p>
               <strong>
-                {batchCounts.completed}/{batchCounts.total || BATCH_DEMO_SIZE}
+                {batchCounts.completed}/{batchCounts.total}
               </strong>
             </div>
-            <progress value={batchCounts.completed} max={batchCounts.total || BATCH_DEMO_SIZE} />
+            <progress value={batchCounts.completed} max={batchProgressMax} />
             <div className="summary-pills">
               <span className="pass">PASS {batchCounts.PASS}</span>
               <span className="fail">FAIL {batchCounts.FAIL}</span>
