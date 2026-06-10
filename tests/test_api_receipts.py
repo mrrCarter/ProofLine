@@ -1,9 +1,13 @@
+import base64
 import json
 import time
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
+from nacl.signing import SigningKey
 
+from app.services import receipts as receipt_service
 from main import app
 
 
@@ -60,6 +64,24 @@ def _terminal_run(client: TestClient, run_id: str) -> dict:
     raise AssertionError("run did not reach a terminal state")
 
 
+def _signed_receipt_for(signing_key: SigningKey, public_key_id: str) -> dict:
+    receipt = {
+        "receiptVersion": "1",
+        "runId": "run-legacy",
+        "requestId": "request-legacy",
+        "artifactSha256": "0" * 64,
+        "rulePack": "spirits-v1@1.0.0",
+        "providers": {"ocr": "legacy", "adjudicator": None},
+        "verdict": "PASS",
+        "findings": [],
+        "timings": {"totalMs": 1, "stages": {}},
+        "createdAt": "2026-06-10T00:00:00Z",
+        "publicKeyId": public_key_id,
+    }
+    signature = signing_key.sign(receipt_service.canonical_receipt_bytes(receipt)).signature
+    return {**receipt, "signature": f"ed25519:{base64.b64encode(signature).decode('ascii')}"}
+
+
 def test_receipt_download_and_verify_round_trip():
     client = _client()
     created = _post_bourbon(client)
@@ -90,6 +112,34 @@ def test_receipt_download_and_verify_round_trip():
     rejected = client.post("/api/receipts/verify", json=tampered)
     assert rejected.status_code == 200
     assert rejected.json()["valid"] is False
+
+
+def test_production_requires_configured_signing_seed(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("PROOFLINE_ENV", "production")
+    monkeypatch.delenv(receipt_service.SIGNING_KEY_ENV, raising=False)
+    monkeypatch.delenv("PROOFLINE_ED25519_PRIVATE_KEY_B64", raising=False)
+
+    with pytest.raises(RuntimeError, match=receipt_service.SIGNING_KEY_ENV):
+        receipt_service._load_signing_key()
+
+
+def test_verify_uses_public_key_id_registry(monkeypatch: pytest.MonkeyPatch):
+    legacy_key_id = "legacy-test-key"
+    legacy_signing_key = SigningKey.generate()
+    legacy_receipt = _signed_receipt_for(legacy_signing_key, legacy_key_id)
+
+    unknown = receipt_service.verify_signed_receipt(legacy_receipt)
+    assert unknown == {
+        "valid": False,
+        "error": "unknown_public_key_id",
+        "publicKeyId": legacy_key_id,
+    }
+
+    monkeypatch.setitem(receipt_service._KEY_REGISTRY, legacy_key_id, legacy_signing_key.verify_key)
+    verified = receipt_service.verify_signed_receipt(legacy_receipt)
+
+    assert verified["valid"] is True
+    assert verified["publicKeyId"] == legacy_key_id
 
 
 def test_artifact_rulepack_cache_returns_signed_receipt_for_new_run():
