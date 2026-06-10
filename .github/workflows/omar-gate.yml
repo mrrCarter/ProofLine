@@ -5,6 +5,11 @@ on:
       - opened
       - synchronize
       - reopened
+  # Post-merge / protected-branch trigger: re-run the gate on main so a
+  # deploy path off main is never outside Omar Gate coverage (Omar P2 ci/cd).
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       scan_mode:
