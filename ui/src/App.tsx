@@ -100,6 +100,7 @@ type BatchResponse = {
 };
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
+const REQUEST_TIMEOUT_MS = 15_000;
 const RUN_WATCHDOG_MS = 15_000;
 const BATCH_DEMO_SIZE = 50;
 
@@ -283,6 +284,24 @@ function classForStatus(status: BatchStatus | Verdict): string {
 
 function stringifyError(caught: unknown, fallback: string): string {
   return caught instanceof Error ? caught.message : fallback;
+}
+
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (caught) {
+    if (caught instanceof DOMException && caught.name === "AbortError") {
+      throw new Error("Request timed out. Please try again.");
+    }
+    throw caught;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -575,7 +594,7 @@ function App() {
   }
 
   async function refreshRun(runId: string) {
-    const response = await fetch(`${API_BASE}/api/runs/${runId}`);
+    const response = await fetchWithTimeout(`${API_BASE}/api/runs/${runId}`);
     if (!response.ok) return null;
     const payload = (await response.json()) as RunState;
     setRunState(payload);
@@ -583,7 +602,7 @@ function App() {
   }
 
   async function refreshBatch(nextBatchId: string) {
-    const response = await fetch(`${API_BASE}/api/batches/${nextBatchId}`);
+    const response = await fetchWithTimeout(`${API_BASE}/api/batches/${nextBatchId}`);
     if (!response.ok) return null;
     const payload = (await response.json()) as BatchResponse;
     const rows = normalizeBatchRows(payload);
@@ -609,7 +628,7 @@ function App() {
     form.append("application_data", JSON.stringify(applicationPayload(fields)));
 
     try {
-      const response = await fetch(`${API_BASE}/api/runs`, {
+      const response = await fetchWithTimeout(`${API_BASE}/api/runs`, {
         method: "POST",
         body: form
       });
@@ -690,7 +709,7 @@ function App() {
     if (!receiptRef) return;
 
     try {
-      const response = await fetch(receiptRef.startsWith("http") ? receiptRef : `${API_BASE}${receiptRef}`);
+      const response = await fetchWithTimeout(receiptRef.startsWith("http") ? receiptRef : `${API_BASE}${receiptRef}`);
       if (!response.ok) throw new Error("Receipt is not available yet.");
       const receipt = await response.json();
       const filename = `proofline-receipt-${runId ?? "batch-row"}.json`;
@@ -765,7 +784,7 @@ function App() {
     form.append("application_data", JSON.stringify(applicationPayload(fields)));
 
     try {
-      const response = await fetch(`${API_BASE}/api/batches`, {
+      const response = await fetchWithTimeout(`${API_BASE}/api/batches`, {
         method: "POST",
         body: form
       });
@@ -801,7 +820,7 @@ function App() {
     setIsBatchRunning(true);
 
     try {
-      const response = await fetch(`${API_BASE}/api/batches/demo`, { method: "POST" });
+      const response = await fetchWithTimeout(`${API_BASE}/api/batches/demo`, { method: "POST" });
       if (response.ok) {
         const payload = (await response.json()) as BatchResponse;
         setBatchId(payload.batchId);
@@ -839,7 +858,7 @@ function App() {
   async function exportBatchCsv() {
     try {
       if (batchExportUrl) {
-        const response = await fetch(batchExportUrl.startsWith("http") ? batchExportUrl : `${API_BASE}${batchExportUrl}`);
+        const response = await fetchWithTimeout(batchExportUrl.startsWith("http") ? batchExportUrl : `${API_BASE}${batchExportUrl}`);
         if (response.ok) {
           const blob = await response.blob();
           downloadBlob(blob, `proofline-batch-${batchId ?? "export"}.csv`);
