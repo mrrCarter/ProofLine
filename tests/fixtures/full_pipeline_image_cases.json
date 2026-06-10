@@ -1,0 +1,42 @@
+[
+  {
+    "fixtureId": "pass_bourbon",
+    "imagePath": "full_pipeline_images/pass_bourbon.png"
+  },
+  {
+    "fixtureId": "brand_case_equivalent",
+    "imagePath": "full_pipeline_images/brand_case_equivalent.png"
+  },
+  {
+    "fixtureId": "brand_material_mismatch",
+    "imagePath": "full_pipeline_images/brand_material_mismatch.png"
+  },
+  {
+    "fixtureId": "abv_mismatch",
+    "imagePath": "full_pipeline_images/abv_mismatch.png"
+  },
+  {
+    "fixtureId": "proof_only_equivalent",
+    "imagePath": "full_pipeline_images/proof_only_equivalent.png"
+  },
+  {
+    "fixtureId": "net_contents_unit_equiv",
+    "imagePath": "full_pipeline_images/net_contents_unit_equiv.png"
+  },
+  {
+    "fixtureId": "warning_missing",
+    "imagePath": "full_pipeline_images/warning_missing.png"
+  },
+  {
+    "fixtureId": "warning_title_case",
+    "imagePath": "full_pipeline_images/warning_title_case.png"
+  },
+  {
+    "fixtureId": "warning_small_font_signal",
+    "imagePath": "full_pipeline_images/warning_small_font_signal.png"
+  },
+  {
+    "fixtureId": "import_missing_origin",
+    "imagePath": "full_pipeline_images/import_missing_origin.png"
+  }
+]
