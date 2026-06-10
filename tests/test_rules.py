@@ -40,6 +40,18 @@ def test_brand_material_mismatch_fails():
     assert finding.confidence < 0.93
 
 
+def test_class_type_match_passes():
+    engine = RuleEngine()
+    findings = engine.evaluate(
+        _ocr("KENTUCKY STRAIGHT BOURBON WHISKY"),
+        {"classType": "Kentucky Straight Bourbon Whisky"},
+    )
+    finding = _finding(findings, "CLASS_TYPE_MATCH")
+
+    assert finding.status == FindingStatus.PASS
+    assert finding.expected["normalized"] == "kentucky straight bourbon whisky"
+
+
 def test_warning_exact_text_passes_with_wrapped_lines():
     engine = RuleEngine()
     wrapped = GOVERNMENT_WARNING_TEXT.replace("birth defects. ", "birth defects.\n")
@@ -75,3 +87,96 @@ def test_aggregate_verdict_fails_on_high_deterministic_failure():
     findings = engine.evaluate(_ocr("Government Warning: wrong case"), {"brandName": "Other Brand"})
 
     assert engine.aggregate_verdict(findings) == "FAIL"
+
+
+def test_proof_only_equivalent_passes_against_abv():
+    engine = RuleEngine()
+    findings = engine.evaluate(_ocr("90 Proof"), {"abv": "45% ABV"})
+    finding = _finding(findings, "ALCOHOL_CONTENT_MATCH")
+
+    assert finding.status == FindingStatus.PASS
+    assert finding.expected["abv"] == 45
+    assert finding.observed["abv"] == 45
+
+
+def test_abv_mismatch_fails():
+    engine = RuleEngine()
+    findings = engine.evaluate(_ocr("40% Alc/Vol"), {"abv": 45})
+    finding = _finding(findings, "ALCOHOL_CONTENT_MATCH")
+
+    assert finding.status == FindingStatus.FAIL
+    assert finding.observed["deltaAbv"] == 5
+
+
+def test_net_contents_unit_equivalent_passes():
+    engine = RuleEngine()
+    findings = engine.evaluate(_ocr("75 cL"), {"netContents": "750 mL"})
+    finding = _finding(findings, "NET_CONTENTS_MATCH")
+
+    assert finding.status == FindingStatus.PASS
+    assert finding.expected["ml"] == 750
+    assert finding.observed["ml"] == 750
+
+
+def test_import_missing_origin_fails():
+    engine = RuleEngine()
+    findings = engine.evaluate(_ocr("Imported whisky"), {"imported": True, "countryOfOrigin": "Scotland"})
+    finding = _finding(findings, "COUNTRY_OF_ORIGIN_IF_IMPORT")
+
+    assert finding.status == FindingStatus.FAIL
+    assert finding.observed["countryPresent"] is False
+
+
+def test_name_address_present_passes():
+    engine = RuleEngine()
+    findings = engine.evaluate(
+        _ocr("Bottled by Old Forester Distilling Co. Louisville KY"),
+        {"applicantName": "Old Forester Distilling Co", "city": "Louisville", "state": "KY"},
+    )
+    finding = _finding(findings, "NAME_ADDRESS_PRESENT")
+
+    assert finding.status == FindingStatus.PASS
+    assert finding.observed["missing"] == []
+
+
+def test_name_address_missing_fails():
+    engine = RuleEngine()
+    findings = engine.evaluate(
+        _ocr("Bottled by Unknown Co."),
+        {"applicantName": "Old Forester Distilling Co", "city": "Louisville", "state": "KY"},
+    )
+    finding = _finding(findings, "NAME_ADDRESS_PRESENT")
+
+    assert finding.status == FindingStatus.FAIL
+    assert finding.observed["missing"] == ["name", "city", "state"]
+
+
+def test_low_readability_routes_unreadable():
+    engine = RuleEngine()
+    findings = engine.evaluate(_ocr("blurry text", confidence=0.4), {"readabilityScore": 0.4})
+    finding = _finding(findings, "IMAGE_READABILITY")
+
+    assert finding.status == FindingStatus.UNREADABLE
+    assert engine.aggregate_verdict(findings) == "UNREADABLE"
+
+
+def test_warning_format_unlikely_needs_review_not_fail():
+    engine = RuleEngine()
+    findings = engine.evaluate(
+        _ocr(GOVERNMENT_WARNING_TEXT),
+        {"warningBoldSignal": "unlikely", "warningBoldConfidence": 0.8},
+    )
+    finding = _finding(findings, "GOVERNMENT_WARNING_FORMAT_SIGNAL")
+
+    assert finding.status == FindingStatus.NEEDS_REVIEW
+    assert engine.aggregate_verdict(findings) == "NEEDS_REVIEW"
+
+
+def test_wine_and_malt_rule_packs_load():
+    wine = RuleEngine("rules/wine-v1.yaml")
+    malt = RuleEngine("rules/malt-v1.yaml")
+
+    assert wine.rule_pack_ref == "wine-v1@1.0.0"
+    assert malt.rule_pack_ref == "malt-v1@1.0.0"
+    assert "GOVERNMENT_WARNING_EXACT_TEXT" in wine.rules_by_id
+    assert "NET_CONTENTS_MATCH" in malt.rules_by_id

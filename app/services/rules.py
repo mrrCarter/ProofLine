@@ -14,6 +14,13 @@ from app.schemas.finding import Evidence, Finding, FindingSeverity, FindingStatu
 
 
 BRAND_MATCH_THRESHOLD = 0.93
+ABV_TOLERANCE = 0.05
+NET_CONTENTS_TOLERANCE_ML = 1.0
+READABILITY_FLOOR = 0.65
+WARNING_FORMAT_SOURCE_URL = (
+    "https://www.ecfr.gov/current/title-27/chapter-I/subchapter-A/part-16/"
+    "subpart-C/section-16.22"
+)
 
 
 def normalize_label_text(text: str) -> str:
@@ -32,7 +39,9 @@ def _default_rule_pack_path() -> Path:
     return Path(__file__).resolve().parents[2] / "rules" / "spirits-v1.yaml"
 
 
-def _bbox_from_item(item: dict[str, Any]) -> Optional[list[list[float]]]:
+def _bbox_from_item(item: Optional[dict[str, Any]]) -> Optional[list[list[float]]]:
+    if item is None:
+        return None
     bbox = item.get("bbox")
     if bbox is None:
         return None
@@ -40,6 +49,10 @@ def _bbox_from_item(item: dict[str, Any]) -> Optional[list[list[float]]]:
         vertices = bbox.get("vertices")
         return vertices if isinstance(vertices, list) else None
     return bbox if isinstance(bbox, list) else None
+
+
+def _clamp(value: float) -> float:
+    return max(0.0, min(value, 1.0))
 
 
 def _confidence_from_items(items: Iterable[dict[str, Any]]) -> float:
@@ -50,7 +63,37 @@ def _confidence_from_items(items: Iterable[dict[str, Any]]) -> float:
     ]
     if not values:
         return 0.0
-    return max(0.0, min(sum(values) / len(values), 1.0))
+    return _clamp(sum(values) / len(values))
+
+
+def _context_value(context: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    for key in keys:
+        value = context.get(key)
+        if value is not None and value != "":
+            return value
+    return None
+
+
+def _as_bool(value: Any) -> Optional[bool]:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in {"true", "yes", "y", "1", "imported"}:
+            return True
+        if normalized in {"false", "no", "n", "0", "domestic"}:
+            return False
+    return None
+
+
+def _as_float(value: Any) -> Optional[float]:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        match = re.search(r"\d+(?:\.\d+)?", value)
+        if match:
+            return float(match.group(0))
+    return None
 
 
 class RuleEngine:
@@ -68,18 +111,69 @@ class RuleEngine:
         return normalize_label_text(text)
 
     def evaluate(self, ocr_results: list[dict[str, Any]], context: dict[str, Any]) -> list[Finding]:
-        findings = []
+        findings: list[Finding] = []
 
-        if "BRAND_NAME_MATCH" in self.rules_by_id:
-            brand_name = self._context_brand(context)
-            if brand_name:
-                findings.append(self._evaluate_brand_name(ocr_results, context, brand_name))
+        brand_name = self._context_text(
+            context,
+            ("brandName", "brand_name", "brand", "applicantBrandName"),
+        )
+        if "BRAND_NAME_MATCH" in self.rules_by_id and brand_name:
+            findings.append(
+                self._evaluate_text_match(
+                    "BRAND_NAME_MATCH",
+                    brand_name,
+                    ocr_results,
+                    context,
+                    label="Brand",
+                )
+            )
+
+        class_type = self._context_text(
+            context,
+            ("classType", "class_type", "classAndType", "class_type_designation"),
+        )
+        if "CLASS_TYPE_MATCH" in self.rules_by_id and class_type:
+            findings.append(
+                self._evaluate_text_match(
+                    "CLASS_TYPE_MATCH",
+                    class_type,
+                    ocr_results,
+                    context,
+                    label="Class/type",
+                )
+            )
+
+        if "ALCOHOL_CONTENT_MATCH" in self.rules_by_id:
+            alcohol = self._evaluate_alcohol_content(ocr_results, context)
+            if alcohol:
+                findings.append(alcohol)
+
+        if "NET_CONTENTS_MATCH" in self.rules_by_id:
+            net_contents = self._evaluate_net_contents(ocr_results, context)
+            if net_contents:
+                findings.append(net_contents)
+
+        if "NAME_ADDRESS_PRESENT" in self.rules_by_id:
+            name_address = self._evaluate_name_address(ocr_results, context)
+            if name_address:
+                findings.append(name_address)
+
+        if "COUNTRY_OF_ORIGIN_IF_IMPORT" in self.rules_by_id:
+            origin = self._evaluate_country_of_origin(ocr_results, context)
+            if origin:
+                findings.append(origin)
 
         if "GOVERNMENT_WARNING_PRESENT" in self.rules_by_id:
             findings.append(self._evaluate_warning_present(ocr_results, context))
 
         if "GOVERNMENT_WARNING_EXACT_TEXT" in self.rules_by_id:
             findings.append(self._evaluate_warning_exact_text(ocr_results, context))
+
+        if "GOVERNMENT_WARNING_FORMAT_SIGNAL" in self.rules_by_id:
+            findings.append(self._evaluate_warning_format(ocr_results, context))
+
+        if "IMAGE_READABILITY" in self.rules_by_id:
+            findings.append(self._evaluate_readability(ocr_results, context))
 
         return findings
 
@@ -110,23 +204,21 @@ class RuleEngine:
             "findings": findings,
         }
 
-    def _context_brand(self, context: dict[str, Any]) -> Optional[str]:
-        for key in ("brandName", "brand_name", "brand", "applicantBrandName"):
-            value = context.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
+    def _context_text(self, context: dict[str, Any], keys: tuple[str, ...]) -> Optional[str]:
+        value = _context_value(context, keys)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
         return None
 
-    def _evaluate_brand_name(
+    def _all_ocr_text(self, ocr_results: list[dict[str, Any]]) -> str:
+        return " ".join(str(item.get("text", "")) for item in ocr_results if item.get("text"))
+
+    def _best_text_match(
         self,
+        expected: str,
         ocr_results: list[dict[str, Any]],
-        context: dict[str, Any],
-        brand_name: str,
-    ) -> Finding:
-        rule = self.rules_by_id["BRAND_NAME_MATCH"]
-        threshold = float(rule.get("threshold", BRAND_MATCH_THRESHOLD))
-        provider = context.get("ocr_provider") or context.get("provider")
-        normalized_brand = self.normalize(brand_name)
+    ) -> tuple[float, Optional[dict[str, Any]], str]:
+        normalized_expected = self.normalize(expected)
         best_ratio = 0.0
         best_match: Optional[dict[str, Any]] = None
         best_normalized = ""
@@ -134,36 +226,288 @@ class RuleEngine:
         for item in ocr_results:
             raw_text = str(item.get("text", ""))
             normalized_ocr = self.normalize(raw_text)
-            ratio = fuzz.ratio(normalized_brand, normalized_ocr) / 100.0
+            ratio = fuzz.ratio(normalized_expected, normalized_ocr) / 100.0
             if ratio > best_ratio:
                 best_ratio = ratio
                 best_match = item
                 best_normalized = normalized_ocr
 
+        return best_ratio, best_match, best_normalized
+
+    def _evaluate_text_match(
+        self,
+        rule_id: str,
+        expected_text: str,
+        ocr_results: list[dict[str, Any]],
+        context: dict[str, Any],
+        label: str,
+    ) -> Finding:
+        rule = self.rules_by_id[rule_id]
+        threshold = float(rule.get("threshold", BRAND_MATCH_THRESHOLD))
+        normalized_expected = self.normalize(expected_text)
+        best_ratio, best_match, best_normalized = self._best_text_match(expected_text, ocr_results)
         status = FindingStatus.PASS if best_ratio >= threshold else FindingStatus.FAIL
         best_text = str(best_match.get("text", "")) if best_match else None
+
         return Finding(
-            ruleId="BRAND_NAME_MATCH",
+            ruleId=rule_id,
             severity=FindingSeverity(rule.get("severity", "HIGH")),
             status=status,
-            expected={"raw": brand_name, "normalized": normalized_brand, "threshold": threshold},
+            expected={"raw": expected_text, "normalized": normalized_expected, "threshold": threshold},
             observed={"raw": best_text, "normalized": best_normalized, "score": round(best_ratio, 4)},
             confidence=round(best_ratio, 4),
             evidence=Evidence(
                 text=best_text,
-                bbox=_bbox_from_item(best_match) if best_match else None,
-                provider=provider,
+                bbox=_bbox_from_item(best_match),
+                provider=context.get("ocr_provider") or context.get("provider"),
             ),
             explanation=(
-                "Brand matched after bounded normalization."
+                f"{label} matched after bounded normalization."
                 if status == FindingStatus.PASS
-                else "Brand did not meet the bounded fuzzy-match threshold."
+                else f"{label} did not meet the bounded fuzzy-match threshold."
             ),
-            remediation=None if status == FindingStatus.PASS else "Confirm application brand matches label text.",
+            remediation=None if status == FindingStatus.PASS else f"Confirm the application {label.lower()} matches label text.",
         )
 
-    def _all_ocr_text(self, ocr_results: list[dict[str, Any]]) -> str:
-        return " ".join(str(item.get("text", "")) for item in ocr_results if item.get("text"))
+    def _expected_alcohol(self, context: dict[str, Any]) -> Optional[dict[str, Any]]:
+        proof = _context_value(context, ("proof", "labelProof"))
+        if proof is not None:
+            value = _as_float(proof)
+            if value is not None:
+                return {"raw": proof, "abv": value / 2, "unit": "proof"}
+
+        abv = _context_value(context, ("abv", "alcoholByVolume", "alcohol_by_volume", "alcoholContent"))
+        if abv is not None:
+            parsed = self._parse_alcohol(str(abv))
+            if parsed:
+                return parsed
+            value = _as_float(abv)
+            if value is not None:
+                return {"raw": abv, "abv": value, "unit": "abv"}
+        return None
+
+    def _parse_alcohol(self, text: str) -> Optional[dict[str, Any]]:
+        proof = re.search(r"(\d+(?:\.\d+)?)\s*proof\b", text, re.IGNORECASE)
+        if proof:
+            value = float(proof.group(1))
+            return {"raw": proof.group(0), "abv": value / 2, "unit": "proof"}
+
+        abv = re.search(
+            r"(\d+(?:\.\d+)?)\s*(?:%\s*)?(?:abv|alc\.?\s*/?\s*vol\.?|alcohol by volume|%)",
+            text,
+            re.IGNORECASE,
+        )
+        if abv:
+            value = float(abv.group(1))
+            return {"raw": abv.group(0), "abv": value, "unit": "abv"}
+        return None
+
+    def _evaluate_alcohol_content(
+        self,
+        ocr_results: list[dict[str, Any]],
+        context: dict[str, Any],
+    ) -> Optional[Finding]:
+        expected = self._expected_alcohol(context)
+        if expected is None:
+            return None
+        rule = self.rules_by_id["ALCOHOL_CONTENT_MATCH"]
+        tolerance = float(rule.get("toleranceAbv", ABV_TOLERANCE))
+        observed = self._parse_alcohol(self._all_ocr_text(ocr_results))
+        if observed is None:
+            return self._missing_finding(
+                "ALCOHOL_CONTENT_MATCH",
+                rule,
+                expected,
+                "Alcohol content was not detected on the label.",
+                "Add alcohol content as ABV or proof.",
+                context,
+            )
+
+        delta = abs(float(expected["abv"]) - float(observed["abv"]))
+        status = FindingStatus.PASS if delta <= tolerance else FindingStatus.FAIL
+        return Finding(
+            ruleId="ALCOHOL_CONTENT_MATCH",
+            severity=FindingSeverity(rule.get("severity", "HIGH")),
+            status=status,
+            expected={**expected, "toleranceAbv": tolerance},
+            observed={**observed, "deltaAbv": round(delta, 4)},
+            confidence=1.0 if status == FindingStatus.PASS else _clamp(1.0 - min(delta / 10.0, 1.0)),
+            evidence=Evidence(
+                text=observed["raw"],
+                provider=context.get("ocr_provider") or context.get("provider"),
+            ),
+            explanation=(
+                "Alcohol content matched after ABV/proof conversion."
+                if status == FindingStatus.PASS
+                else "Alcohol content differed beyond the ABV tolerance."
+            ),
+            remediation=None if status == FindingStatus.PASS else "Correct the stated ABV/proof equivalence.",
+        )
+
+    def _expected_net_contents(self, context: dict[str, Any]) -> Optional[dict[str, Any]]:
+        value = _context_value(context, ("netContents", "net_contents", "containerSize", "bottleSize"))
+        return self._parse_net_contents(str(value)) if value is not None else None
+
+    def _parse_net_contents(self, text: str) -> Optional[dict[str, Any]]:
+        match = re.search(
+            r"(\d+(?:\.\d+)?)\s*(ml|milliliters?|cl|centiliters?|l|liters?)\b",
+            text,
+            re.IGNORECASE,
+        )
+        if not match:
+            return None
+        value = float(match.group(1))
+        unit = match.group(2).casefold()
+        multiplier = 1.0
+        if unit in {"cl", "centiliter", "centiliters"}:
+            multiplier = 10.0
+        elif unit in {"l", "liter", "liters"}:
+            multiplier = 1000.0
+        return {"raw": match.group(0), "ml": value * multiplier, "unit": unit}
+
+    def _evaluate_net_contents(
+        self,
+        ocr_results: list[dict[str, Any]],
+        context: dict[str, Any],
+    ) -> Optional[Finding]:
+        expected = self._expected_net_contents(context)
+        if expected is None:
+            return None
+        rule = self.rules_by_id["NET_CONTENTS_MATCH"]
+        tolerance = float(rule.get("toleranceMl", NET_CONTENTS_TOLERANCE_ML))
+        observed = self._parse_net_contents(self._all_ocr_text(ocr_results))
+        if observed is None:
+            return self._missing_finding(
+                "NET_CONTENTS_MATCH",
+                rule,
+                expected,
+                "Net contents were not detected on the label.",
+                "Add the required net contents statement.",
+                context,
+            )
+
+        delta = abs(float(expected["ml"]) - float(observed["ml"]))
+        status = FindingStatus.PASS if delta <= tolerance else FindingStatus.FAIL
+        return Finding(
+            ruleId="NET_CONTENTS_MATCH",
+            severity=FindingSeverity(rule.get("severity", "HIGH")),
+            status=status,
+            expected={**expected, "toleranceMl": tolerance},
+            observed={**observed, "deltaMl": round(delta, 4)},
+            confidence=1.0 if status == FindingStatus.PASS else _clamp(1.0 - min(delta / 1000.0, 1.0)),
+            evidence=Evidence(
+                text=observed["raw"],
+                provider=context.get("ocr_provider") or context.get("provider"),
+            ),
+            explanation=(
+                "Net contents matched after unit normalization to milliliters."
+                if status == FindingStatus.PASS
+                else "Net contents differed beyond the milliliter tolerance."
+            ),
+            remediation=None if status == FindingStatus.PASS else "Correct the label net contents or application value.",
+        )
+
+    def _evaluate_name_address(
+        self,
+        ocr_results: list[dict[str, Any]],
+        context: dict[str, Any],
+    ) -> Optional[Finding]:
+        name = self._context_text(
+            context,
+            ("applicantName", "applicant_name", "bottlerName", "producerName", "name"),
+        )
+        city = self._context_text(context, ("city", "producerCity", "bottlerCity"))
+        state = self._context_text(context, ("state", "producerState", "bottlerState"))
+        if not any((name, city, state)):
+            return None
+
+        rule = self.rules_by_id["NAME_ADDRESS_PRESENT"]
+        label_text = self.normalize(self._all_ocr_text(ocr_results))
+        missing = []
+        if name and self.normalize(name) not in label_text:
+            missing.append("name")
+        if city and self.normalize(city) not in label_text:
+            missing.append("city")
+        if state and self.normalize(state) not in label_text:
+            missing.append("state")
+
+        status = FindingStatus.PASS if not missing else FindingStatus.FAIL
+        return Finding(
+            ruleId="NAME_ADDRESS_PRESENT",
+            severity=FindingSeverity(rule.get("severity", "HIGH")),
+            status=status,
+            expected={"name": name, "city": city, "state": state},
+            observed={"normalizedLabelText": label_text[:500], "missing": missing},
+            confidence=_confidence_from_items(ocr_results),
+            evidence=Evidence(
+                text=self._all_ocr_text(ocr_results)[:500],
+                provider=context.get("ocr_provider") or context.get("provider"),
+            ),
+            explanation=(
+                "Required producer/bottler name and address signals were present."
+                if status == FindingStatus.PASS
+                else "Required producer/bottler name or address signal was missing."
+            ),
+            remediation=None if status == FindingStatus.PASS else "Add the producer/bottler name and city/state.",
+        )
+
+    def _evaluate_country_of_origin(
+        self,
+        ocr_results: list[dict[str, Any]],
+        context: dict[str, Any],
+    ) -> Optional[Finding]:
+        imported = _as_bool(_context_value(context, ("imported", "isImported", "originType")))
+        if imported is None:
+            return None
+        rule = self.rules_by_id["COUNTRY_OF_ORIGIN_IF_IMPORT"]
+        country = self._context_text(context, ("countryOfOrigin", "country_of_origin", "originCountry"))
+        label_text = self.normalize(self._all_ocr_text(ocr_results))
+
+        if imported is False:
+            return Finding(
+                ruleId="COUNTRY_OF_ORIGIN_IF_IMPORT",
+                severity=FindingSeverity(rule.get("severity", "HIGH")),
+                status=FindingStatus.PASS,
+                expected={"imported": False},
+                observed={"required": False},
+                confidence=1.0,
+                evidence=None,
+                explanation="Country of origin is not required for domestic context.",
+                remediation=None,
+            )
+
+        if not country:
+            return Finding(
+                ruleId="COUNTRY_OF_ORIGIN_IF_IMPORT",
+                severity=FindingSeverity(rule.get("severity", "HIGH")),
+                status=FindingStatus.NEEDS_REVIEW,
+                expected={"imported": True, "country": None},
+                observed={"normalizedLabelText": label_text[:500]},
+                confidence=_confidence_from_items(ocr_results),
+                evidence=Evidence(text=self._all_ocr_text(ocr_results)[:500]),
+                explanation="Imported product lacks a country-of-origin value in application data.",
+                remediation="Provide country of origin for imported products.",
+            )
+
+        present = self.normalize(country) in label_text
+        return Finding(
+            ruleId="COUNTRY_OF_ORIGIN_IF_IMPORT",
+            severity=FindingSeverity(rule.get("severity", "HIGH")),
+            status=FindingStatus.PASS if present else FindingStatus.FAIL,
+            expected={"imported": True, "country": country, "normalized": self.normalize(country)},
+            observed={"normalizedLabelText": label_text[:500], "countryPresent": present},
+            confidence=_confidence_from_items(ocr_results),
+            evidence=Evidence(
+                text=self._all_ocr_text(ocr_results)[:500],
+                provider=context.get("ocr_provider") or context.get("provider"),
+            ),
+            explanation=(
+                "Country of origin was present for imported product."
+                if present
+                else "Country of origin was not detected for imported product."
+            ),
+            remediation=None if present else "Add country of origin to the label.",
+        )
 
     def _evaluate_warning_present(
         self,
@@ -240,4 +584,99 @@ class RuleEngine:
                 )
             ),
             remediation=None if exact_present else "Use the exact 27 CFR 16.21 warning statement and uppercase prefix.",
+        )
+
+    def _evaluate_warning_format(
+        self,
+        ocr_results: list[dict[str, Any]],
+        context: dict[str, Any],
+    ) -> Finding:
+        rule = self.rules_by_id["GOVERNMENT_WARNING_FORMAT_SIGNAL"]
+        signal = str(_context_value(context, ("warningBoldSignal", "boldSignal")) or "indeterminate").casefold()
+        if signal not in {"likely", "unlikely", "indeterminate"}:
+            signal = "indeterminate"
+        confidence = _as_float(_context_value(context, ("warningBoldConfidence", "boldConfidence")))
+        if confidence is None:
+            confidence = _confidence_from_items(ocr_results)
+        status = FindingStatus.PASS if signal == "likely" else FindingStatus.NEEDS_REVIEW
+
+        return Finding(
+            ruleId="GOVERNMENT_WARNING_FORMAT_SIGNAL",
+            severity=FindingSeverity(rule.get("severity", "MEDIUM")),
+            status=status,
+            expected={
+                "prefix": "GOVERNMENT WARNING",
+                "capitalLetters": True,
+                "boldType": "likely",
+                "sourceUrl": WARNING_FORMAT_SOURCE_URL,
+                "note": "Photo evidence cannot prove physical type size without scale.",
+            },
+            observed={
+                "boldSignal": signal,
+                "sizeSignal": context.get("warningSizeSignal", "indeterminate"),
+                "sizeRatio": context.get("warningSizeRatio"),
+            },
+            confidence=_clamp(float(confidence)),
+            evidence=Evidence(
+                text=collapse_statement_whitespace(self._all_ocr_text(ocr_results))[:500],
+                provider=context.get("ocr_provider") or context.get("provider"),
+            ),
+            explanation=(
+                "Warning format signal is likely compliant."
+                if status == FindingStatus.PASS
+                else "Warning format signal requires human review; photos cannot prove bold/size conclusively."
+            ),
+            remediation=None if status == FindingStatus.PASS else "Review warning crop for bold type and relative size.",
+        )
+
+    def _evaluate_readability(
+        self,
+        ocr_results: list[dict[str, Any]],
+        context: dict[str, Any],
+    ) -> Finding:
+        rule = self.rules_by_id["IMAGE_READABILITY"]
+        floor = float(rule.get("floor", READABILITY_FLOOR))
+        score = _as_float(_context_value(context, ("readabilityScore", "readability_score")))
+        if score is None:
+            score = _confidence_from_items(ocr_results)
+        score = _clamp(float(score))
+        status = FindingStatus.PASS if score >= floor else FindingStatus.UNREADABLE
+        return Finding(
+            ruleId="IMAGE_READABILITY",
+            severity=FindingSeverity(rule.get("severity", "HIGH")),
+            status=status,
+            expected={"minimumReadabilityScore": floor},
+            observed={"readabilityScore": round(score, 4)},
+            confidence=score,
+            evidence=Evidence(
+                text=collapse_statement_whitespace(self._all_ocr_text(ocr_results))[:500],
+                provider=context.get("ocr_provider") or context.get("provider"),
+            ),
+            explanation=(
+                "Image readability is above the deterministic floor."
+                if status == FindingStatus.PASS
+                else "Image readability is below the deterministic floor; verdict must not be a confident pass."
+            ),
+            remediation=None if status == FindingStatus.PASS else "Upload a clearer label image.",
+        )
+
+    def _missing_finding(
+        self,
+        rule_id: str,
+        rule: dict[str, Any],
+        expected: dict[str, Any],
+        explanation: str,
+        remediation: str,
+        context: dict[str, Any],
+    ) -> Finding:
+        return Finding(
+            ruleId=rule_id,
+            severity=FindingSeverity(rule.get("severity", "HIGH")),
+            status=FindingStatus.FAIL,
+            expected=expected,
+            observed=None,
+            confidence=0.0,
+            evidence=Evidence(provider=context.get("ocr_provider") or context.get("provider")),
+            explanation=explanation,
+            remediation=remediation,
         )
