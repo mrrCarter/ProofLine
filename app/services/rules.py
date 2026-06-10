@@ -232,6 +232,17 @@ class RuleEngine:
                 best_match = item
                 best_normalized = normalized_ocr
 
+        full_text = self.normalize(self._all_ocr_text(ocr_results))
+        if full_text:
+            full_text_ratio = max(
+                fuzz.partial_ratio(normalized_expected, full_text) / 100.0,
+                fuzz.token_set_ratio(normalized_expected, full_text) / 100.0,
+            )
+            if full_text_ratio > best_ratio:
+                best_ratio = full_text_ratio
+                best_match = None
+                best_normalized = full_text
+
         return best_ratio, best_match, best_normalized
 
     def _evaluate_text_match(
