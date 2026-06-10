@@ -64,6 +64,7 @@ type Sample = {
 };
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
+const RUN_WATCHDOG_MS = 15_000;
 
 const PNG_1X1_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
@@ -231,6 +232,22 @@ function App() {
 
       const source = new EventSource(`${API_BASE}${payload.eventsUrl}`);
       source.onmessage = () => undefined;
+      let isSettled = false;
+      let watchdogId: number | undefined;
+
+      async function settleRun(message?: string) {
+        if (isSettled) return;
+        isSettled = true;
+        if (watchdogId !== undefined) window.clearTimeout(watchdogId);
+        source.close();
+        await refreshRun(payload.runId);
+        if (message) setError(message);
+        setIsRunning(false);
+      }
+
+      watchdogId = window.setTimeout(() => {
+        void settleRun("Verification timed out waiting for completion; showing the latest run state.");
+      }, RUN_WATCHDOG_MS);
 
       const eventNames = [
         "run.created",
@@ -250,17 +267,13 @@ function App() {
           ]);
 
           if (eventName === "run.completed") {
-            source.close();
-            await refreshRun(payload.runId);
-            setIsRunning(false);
+            await settleRun();
           }
         });
       });
 
-      source.onerror = async () => {
-        source.close();
-        await refreshRun(payload.runId);
-        setIsRunning(false);
+      source.onerror = () => {
+        void settleRun();
       };
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Verification failed.");
