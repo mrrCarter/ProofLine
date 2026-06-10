@@ -83,12 +83,6 @@ jobs:
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.14"
-      - name: Install OCR runtime
-        shell: bash
-        run: |-
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends tesseract-ocr
       - name: Install Python test dependencies
         shell: bash
         run: |-
@@ -128,6 +122,18 @@ jobs:
             echo "commit=${GITHUB_SHA}"
             echo "image_id=$(cat proofline-image.iid)"
           } > proofline-image-manifest.txt
+      - name: Run container OCR latency gate
+        shell: bash
+        run: |-
+          set -euo pipefail
+          image_id="$(cat proofline-image.iid)"
+          docker run --rm --user root \
+            -e PROOFLINE_ENV=test \
+            -e PROOFLINE_ALLOW_EPHEMERAL_RECEIPTS=true \
+            -e PROOFLINE_PUBLIC_KEY_ID=proofline-test-ephemeral \
+            --entrypoint sh \
+            "${image_id}" \
+            -c "python -m pip install --no-cache-dir pytest==9.0.3 && python -m pytest -q -m latency"
       - name: Upload image manifest
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
