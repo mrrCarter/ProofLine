@@ -1,0 +1,10 @@
+services:
+  proofline:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - VISION_PROVIDER=mock
+      - UI_STATIC_DIR=/app/static
+    volumes:
+      - ./artifacts:/app/artifacts

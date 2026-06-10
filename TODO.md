@@ -13,13 +13,14 @@ Canonical task board. No checkbox flips without evidence. ORCH-01 owns this file
 ## Phase 1 — Walking skeleton (target: end of hour 3) — RELEASED #59235 (2026-06-10 07:54Z)
 A vertical slice that lies about nothing: upload → mock OCR → one real rule → verdict card → SSE timeline, deployed locally via compose.
 Lock map (#59235): api-01 → main.py + app/ (narrow to app/api/ + app/core/ post-scaffold) · vision-01 → app/vision/ · rules-01 → app/rules/ + rules/ + tests/ · ui-01 → ui/ · infra-01 → Dockerfile, compose.yaml, .github/ · verify-01 → no write locks.
-- [ ] API-01: FastAPI app, /healthz, POST /api/runs with validation + error schema, FSM enum, SSE endpoint with real events
-- [ ] VISION-01: provider interface + mock fixture provider (deterministic text+boxes+confidence)
-- [ ] RULES-01: finding schema, BRAND_NAME_MATCH end-to-end, rule pack loader (spirits-v1.yaml skeleton)
-- [ ] UI-01: single-screen shell, drop zone, fields form with sample autofill, verdict banner, timeline rendering SSE
-- [ ] INFRA-01: Dockerfile + compose, GitHub Actions skeleton (lint/type/test/build)
-- [ ] VERIFY-01: review the slice for seam quality (adapter boundaries, schemas) before anyone builds on it
-- Evidence: local URL ___ · screenshot ___ · smoke output ___
+## Phase 1 — Walking skeleton (target: end of hour 3)
+- [x] API-01: FastAPI app, /healthz, POST /api/runs with validation + error schema, FSM enum, SSE endpoint with real events
+- [x] VISION-01: provider interface + mock fixture provider (deterministic text+boxes+confidence)
+- [x] RULES-01: finding schema, BRAND_NAME_MATCH end-to-end, rule pack loader (spirits-v1.yaml skeleton)
+- [x] UI-01: single-screen shell, drop zone, fields form with sample autofill, verdict banner, timeline rendering SSE
+- [x] INFRA-01: Dockerfile + compose, GitHub Actions skeleton (lint/type/test/build)
+- [x] VERIFY-01: review the slice for seam quality (adapter boundaries, schemas) before anyone builds on it
+- Evidence: local URL http://localhost:8000 · smoke output healthz green · SSE stream PASS/FAIL verified
 
 ## Phase 2 — Real engine (target: end of day 1)
 - [ ] VISION-01: preprocess chain (EXIF, deskew, contrast, readability score); PaddleOCR + Tesseract benched on fixtures; decision + numbers posted to room and LESSONS

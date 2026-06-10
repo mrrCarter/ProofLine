@@ -1,9 +1,11 @@
+import os
 import uuid
 
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.api import api_router
@@ -11,6 +13,11 @@ from app.api.api import api_router
 app = FastAPI(title="ProofLine API", version="0.1.0-skeleton")
 
 app.include_router(api_router)
+
+# Serve static UI if directory exists
+static_dir = os.getenv("UI_STATIC_DIR", "static")
+if os.path.exists(static_dir):
+    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
 
 @app.exception_handler(StarletteHTTPException)
