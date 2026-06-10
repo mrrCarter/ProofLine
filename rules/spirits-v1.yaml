@@ -1,0 +1,19 @@
+id: spirits-v1
+name: Spirits Rule Pack
+version: "1.0.0"
+commodity: spirits
+rules:
+  - id: BRAND_NAME_MATCH
+    name: Brand Name Match
+    severity: HIGH
+    threshold: 0.93
+    description: Verifies that the brand name on the label matches the expected brand name.
+  - id: GOVERNMENT_WARNING_PRESENT
+    name: Government Warning Present
+    severity: HIGH
+    description: Detects the required government warning anchor on the label.
+  - id: GOVERNMENT_WARNING_EXACT_TEXT
+    name: Government Warning Exact Text
+    severity: HIGH
+    source: https://www.ecfr.gov/current/title-27/chapter-I/subchapter-A/part-16/subpart-C/section-16.21
+    description: Compares the warning statement to the pinned 27 CFR 16.21 text with whitespace-collapse-only normalization.
