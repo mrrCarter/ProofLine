@@ -74,6 +74,16 @@ def _context_value(context: dict[str, Any], keys: tuple[str, ...]) -> Any:
     return None
 
 
+def _mapping_value(value: Any, keys: tuple[str, ...]) -> Any:
+    if not isinstance(value, dict):
+        return None
+    return _context_value(value, keys)
+
+
+def _test_only_enabled(value: Any) -> bool:
+    return value is True or (isinstance(value, str) and value.strip().casefold() in {"1", "true", "yes"})
+
+
 def _as_bool(value: Any) -> Optional[bool]:
     if isinstance(value, bool):
         return value
@@ -212,6 +222,133 @@ class RuleEngine:
 
     def _all_ocr_text(self, ocr_results: list[dict[str, Any]]) -> str:
         return " ".join(str(item.get("text", "")) for item in ocr_results if item.get("text"))
+
+    def _warning_text_observation(self, ocr_results: list[dict[str, Any]]) -> dict[str, Any]:
+        expected = collapse_statement_whitespace(GOVERNMENT_WARNING_TEXT)
+        observed = collapse_statement_whitespace(self._all_ocr_text(ocr_results))
+        prefix = re.search(r"\bgovernment\s+warning\s*:", observed, re.IGNORECASE)
+        prefix_text = prefix.group(0) if prefix else None
+        return {
+            "expected": expected,
+            "observed": observed,
+            "exactPresent": expected in observed,
+            "prefix": prefix_text,
+            "prefixCaseOk": prefix_text == "GOVERNMENT WARNING:" if prefix_text else False,
+            "caseOnlyMismatch": expected.casefold() in observed.casefold(),
+        }
+
+    def _anchor_token_confidence(self, ocr_results: list[dict[str, Any]], required_tokens: set[str]) -> Optional[float]:
+        if not required_tokens:
+            return None
+        matched: dict[str, float] = {}
+        for item in ocr_results:
+            confidence = _as_float(item.get("confidence"))
+            if confidence is None:
+                continue
+            for token in re.findall(r"[a-z0-9]+", self.normalize(str(item.get("text", "")))):
+                if token in required_tokens:
+                    matched[token] = max(matched.get(token, 0.0), _clamp(float(confidence)))
+        if set(matched) != required_tokens:
+            return None
+        return min(matched.values())
+
+    def _readability_anchor_visibility(
+        self,
+        ocr_results: list[dict[str, Any]],
+        context: dict[str, Any],
+        floor: float,
+    ) -> dict[str, Any]:
+        label_text = self.normalize(self._all_ocr_text(ocr_results))
+        warning_confidence = self._anchor_token_confidence(ocr_results, {"government", "warning"})
+        warning_visible = warning_confidence is not None and warning_confidence >= floor
+
+        name = self._context_text(
+            context,
+            ("applicantName", "applicant_name", "bottlerName", "producerName", "name"),
+        )
+        city = self._context_text(context, ("city", "producerCity", "bottlerCity"))
+        state = self._context_text(context, ("state", "producerState", "bottlerState"))
+        name_address_values = [value for value in (name, city, state) if value]
+        expected_name_address_present = bool(name_address_values) and all(
+            self.normalize(value) in label_text for value in name_address_values
+        )
+        name_address_tokens: set[str] = set()
+        for value in name_address_values:
+            name_address_tokens.update(re.findall(r"[a-z0-9]+", self.normalize(value)))
+        name_address_confidence = (
+            self._anchor_token_confidence(ocr_results, name_address_tokens)
+            if expected_name_address_present
+            else None
+        )
+        name_address_visible = (
+            expected_name_address_present
+            and name_address_confidence is not None
+            and name_address_confidence >= floor
+        )
+
+        return {
+            "warningAnchorVisible": warning_visible,
+            "warningAnchorConfidence": round(warning_confidence, 4) if warning_confidence is not None else None,
+            "nameAddressAnchorVisible": name_address_visible,
+            "nameAddressAnchorConfidence": (
+                round(name_address_confidence, 4) if name_address_confidence is not None else None
+            ),
+            "requiredAnchorsVisible": warning_visible and name_address_visible,
+        }
+
+    def _computed_warning_format_signal(self, context: dict[str, Any]) -> dict[str, Any]:
+        pipeline_context = context.get("_pipelineComputed") or context.get("pipelineComputed")
+        format_context = _mapping_value(pipeline_context, ("warningFormat", "warning_format"))
+        signal = _mapping_value(
+            format_context,
+            ("boldSignal", "warningBoldSignal", "bold_signal", "warning_bold_signal"),
+        )
+        confidence = _as_float(
+            _mapping_value(
+                format_context,
+                ("boldConfidence", "warningBoldConfidence", "bold_confidence", "warning_bold_confidence"),
+            )
+        )
+        size_signal = _mapping_value(format_context, ("sizeSignal", "warningSizeSignal", "size_signal"))
+        size_ratio = _mapping_value(format_context, ("sizeRatio", "warningSizeRatio", "size_ratio"))
+        source = "pipeline_computed"
+
+        if signal is None and _test_only_enabled(context.get("testOnlyComputedFormatSignal")):
+            signal = _context_value(context, ("test_override_warningBoldSignal", "testOverrideWarningBoldSignal"))
+            confidence = _as_float(
+                _context_value(context, ("test_override_warningBoldConfidence", "testOverrideWarningBoldConfidence"))
+            )
+            size_signal = _context_value(context, ("test_override_warningSizeSignal", "testOverrideWarningSizeSignal"))
+            size_ratio = _context_value(context, ("test_override_warningSizeRatio", "testOverrideWarningSizeRatio"))
+            source = "test_override"
+
+        normalized = str(signal or "indeterminate").casefold()
+        if normalized not in {"likely", "unlikely", "indeterminate"}:
+            normalized = "indeterminate"
+        caller_supplied_present = (
+            _context_value(
+                context,
+                (
+                    "warningBoldSignal",
+                    "boldSignal",
+                    "computedWarningBoldSignal",
+                    "pipelineWarningBoldSignal",
+                    "computed_warning_bold_signal",
+                    "warningFormatBoldSignal",
+                ),
+            )
+            is not None
+            or isinstance(context.get("warningFormat"), dict)
+            or isinstance(context.get("warning_format"), dict)
+        )
+        return {
+            "signal": normalized,
+            "confidence": confidence,
+            "sizeSignal": size_signal or "indeterminate",
+            "sizeRatio": size_ratio,
+            "source": source if signal is not None else "not_computed",
+            "legacyCallerSignalIgnored": caller_supplied_present and source != "test_override",
+        }
 
     def _best_text_match(
         self,
@@ -569,14 +706,14 @@ class RuleEngine:
         context: dict[str, Any],
     ) -> Finding:
         rule = self.rules_by_id["GOVERNMENT_WARNING_EXACT_TEXT"]
-        expected = collapse_statement_whitespace(GOVERNMENT_WARNING_TEXT)
-        observed = collapse_statement_whitespace(self._all_ocr_text(ocr_results))
-        exact_present = expected in observed
-        prefix = re.search(r"\bgovernment\s+warning\s*:", observed, re.IGNORECASE)
-        prefix_text = prefix.group(0) if prefix else None
-        prefix_case_ok = prefix_text == "GOVERNMENT WARNING:" if prefix_text else False
+        observation = self._warning_text_observation(ocr_results)
+        expected = observation["expected"]
+        observed = observation["observed"]
+        exact_present = bool(observation["exactPresent"])
+        prefix_text = observation["prefix"]
+        prefix_case_ok = bool(observation["prefixCaseOk"])
         confidence = _confidence_from_items(ocr_results)
-        case_only_mismatch = expected.casefold() in observed.casefold()
+        case_only_mismatch = bool(observation["caseOnlyMismatch"])
         status = FindingStatus.PASS if exact_present else FindingStatus.FAIL
         if not exact_present and case_only_mismatch and not prefix_case_ok and confidence < 0.9:
             status = FindingStatus.NEEDS_REVIEW
@@ -619,13 +756,42 @@ class RuleEngine:
         context: dict[str, Any],
     ) -> Finding:
         rule = self.rules_by_id["GOVERNMENT_WARNING_FORMAT_SIGNAL"]
-        signal = str(_context_value(context, ("warningBoldSignal", "boldSignal")) or "indeterminate").casefold()
-        if signal not in {"likely", "unlikely", "indeterminate"}:
-            signal = "indeterminate"
-        confidence = _as_float(_context_value(context, ("warningBoldConfidence", "boldConfidence")))
+        signal_result = self._computed_warning_format_signal(context)
+        signal = str(signal_result["signal"])
+        confidence = signal_result["confidence"]
         if confidence is None:
             confidence = _confidence_from_items(ocr_results)
-        status = FindingStatus.PASS if signal == "likely" else FindingStatus.NEEDS_REVIEW
+        confidence = _clamp(float(confidence))
+        warning_text = self._warning_text_observation(ocr_results)
+        fallback_pass = (
+            signal == "indeterminate"
+            and warning_text["exactPresent"]
+            and warning_text["prefixCaseOk"]
+            and confidence >= 0.9
+        )
+        status = (
+            FindingStatus.PASS
+            if signal == "likely" or fallback_pass
+            else FindingStatus.NEEDS_REVIEW
+        )
+        if signal == "likely":
+            explanation = "Pipeline-computed warning bold signal is likely compliant."
+            remediation = None
+        elif fallback_pass:
+            explanation = (
+                "Warning bold was not provable from the photo, but exact warning text, uppercase prefix, "
+                "and high OCR confidence were verified; format passes with caveat."
+            )
+            remediation = None
+        elif signal == "unlikely":
+            explanation = "Pipeline-computed warning bold signal is unlikely; human review is required."
+            remediation = "Review warning crop for bold type and relative size."
+        else:
+            explanation = (
+                "Warning bold was not provable from the photo and text/prefix confidence did not satisfy "
+                "the PASS-with-caveat policy."
+            )
+            remediation = "Upload a clearer label image or review warning crop for bold type and relative size."
 
         return Finding(
             ruleId="GOVERNMENT_WARNING_FORMAT_SIGNAL",
@@ -637,23 +803,28 @@ class RuleEngine:
                 "boldType": "likely",
                 "sourceUrl": WARNING_FORMAT_SOURCE_URL,
                 "note": "Photo evidence cannot prove physical type size without scale.",
+                "fallbackPolicy": (
+                    "If the computed bold signal is indeterminate, exact text + uppercase prefix + "
+                    "OCR confidence >= 0.9 passes with caveat."
+                ),
             },
             observed={
                 "boldSignal": signal,
-                "sizeSignal": context.get("warningSizeSignal", "indeterminate"),
-                "sizeRatio": context.get("warningSizeRatio"),
+                "signalSource": signal_result["source"],
+                "legacyCallerSignalIgnored": signal_result["legacyCallerSignalIgnored"],
+                "sizeSignal": signal_result["sizeSignal"],
+                "sizeRatio": signal_result["sizeRatio"],
+                "exactTextPresent": warning_text["exactPresent"],
+                "prefixCaseOk": warning_text["prefixCaseOk"],
+                "passWithCaveat": fallback_pass,
             },
-            confidence=_clamp(float(confidence)),
+            confidence=confidence,
             evidence=Evidence(
                 text=collapse_statement_whitespace(self._all_ocr_text(ocr_results))[:500],
                 provider=context.get("ocr_provider") or context.get("provider"),
             ),
-            explanation=(
-                "Warning format signal is likely compliant."
-                if status == FindingStatus.PASS
-                else "Warning format signal requires human review; photos cannot prove bold/size conclusively."
-            ),
-            remediation=None if status == FindingStatus.PASS else "Review warning crop for bold type and relative size.",
+            explanation=explanation,
+            remediation=remediation,
         )
 
     def _evaluate_readability(
@@ -667,24 +838,35 @@ class RuleEngine:
         if score is None:
             score = _confidence_from_items(ocr_results)
         score = _clamp(float(score))
-        status = FindingStatus.PASS if score >= floor else FindingStatus.UNREADABLE
+        anchor_visibility = self._readability_anchor_visibility(ocr_results, context, floor)
+        status = FindingStatus.PASS
+        if score < floor:
+            status = FindingStatus.NEEDS_REVIEW if anchor_visibility["requiredAnchorsVisible"] else FindingStatus.UNREADABLE
+        if status == FindingStatus.PASS:
+            explanation = "Image readability is above the deterministic floor."
+            remediation = None
+        elif status == FindingStatus.NEEDS_REVIEW:
+            explanation = (
+                "Image readability is below the global deterministic floor, but required warning and "
+                "name/address anchors were detected at token confidence above the floor; human review is required."
+            )
+            remediation = "Review the warning and name/address crops before accepting the label."
+        else:
+            explanation = "Image readability is below the deterministic floor and required content was not located."
+            remediation = "Upload a clearer label image."
         return Finding(
             ruleId="IMAGE_READABILITY",
             severity=FindingSeverity(rule.get("severity", "HIGH")),
             status=status,
             expected={"minimumReadabilityScore": floor},
-            observed={"readabilityScore": round(score, 4)},
+            observed={"readabilityScore": round(score, 4), **anchor_visibility},
             confidence=score,
             evidence=Evidence(
                 text=collapse_statement_whitespace(self._all_ocr_text(ocr_results))[:500],
                 provider=context.get("ocr_provider") or context.get("provider"),
             ),
-            explanation=(
-                "Image readability is above the deterministic floor."
-                if status == FindingStatus.PASS
-                else "Image readability is below the deterministic floor; verdict must not be a confident pass."
-            ),
-            remediation=None if status == FindingStatus.PASS else "Upload a clearer label image.",
+            explanation=explanation,
+            remediation=remediation,
         )
 
     def _missing_finding(
