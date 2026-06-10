@@ -330,10 +330,10 @@ function readNumber(value: unknown, fallback = 0): number {
 function normalizeBatchRow(value: unknown, index: number): BatchRow {
   const source = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const verdict = readString(source.verdict, "") as Verdict;
-  const statusValue = readString(source.status, verdict ?? "QUEUED") as BatchStatus;
+  const statusValue = readString(source.status ?? source.state, verdict ?? "QUEUED") as BatchStatus;
   const runId = readString(source.runId, "") || null;
   return {
-    id: readString(source.id, runId ?? `row-${index + 1}`),
+    id: readString(source.id ?? source.itemId, runId ?? `row-${index + 1}`),
     fileName: readString(source.fileName ?? source.filename ?? source.name, `label-${String(index + 1).padStart(2, "0")}.png`),
     status: statusValue,
     verdict,
@@ -706,6 +706,7 @@ function App() {
     const source = new EventSource(`${API_BASE}${eventsUrl}`);
     const eventNames = [
       "batch.created",
+      "batch.item.queued",
       "batch.item.started",
       "batch.item.completed",
       "batch.item.failed",
@@ -760,7 +761,7 @@ function App() {
     setIsBatchRunning(true);
 
     const form = new FormData();
-    form.append("batch", batchFile);
+    form.append("files", batchFile);
     form.append("application_data", JSON.stringify(applicationPayload(fields)));
 
     try {
