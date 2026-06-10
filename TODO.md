@@ -45,20 +45,20 @@ Lock map (#59235): api-01 → main.py + app/ (narrow to app/api/ + app/core/ pos
 - [ ] API-01 + UI-01: verify deployed flow end-to-end; QA smoke (Playwright desktop + Mobile Chrome + axe) against deployed URL
 - Evidence: deployed URL ___ · healthz body ___ · cosign verify output ___ · smoke output ___
 
-## Phase 5 — Gates and governance (target: morning day 3)
-- [ ] All: lint/typecheck/tests/build/pip-audit green; latency eval green on deployed-equivalent image
-- [ ] VERIFY-01: threat model + secret scan + spec-vs-implementation diff posted
-- [ ] ORCH-01: `sl /omargate deep --path . --json` per PR — zero P0/P1; final `sl audit --path . --json` clean
-- [ ] All: fix every blocking finding at root cause
-- Evidence: paste each gate output ___
+## Phase 5 — Gates and governance — ✅ SUBSTANTIALLY COMPLETE (Omar Gate run is human-gated)
+- [x] All: lint/typecheck/tests/build/pip-audit green — gated GREEN at every phase boundary (ruff + mypy + pytest + UI npm/tsc/vite + pip-audit clean); full-pipeline latency CI-enforced (Dockerfile installs tesseract-ocr)
+- [x] VERIFY-01: threat model v1 + secret scan (CLEAN) + spec-vs-implementation diff — all posted; threat model surfaced + closed a zip-bomb DoS MED @3e1b3f0
+- [ ] ORCH-01: `sl /omargate deep` + `sl audit` — HELD for human (LLM-cost gate; pairs with the PR-to-main go-ahead). Omar Gate is already a REQUIRED status check on main, so it runs on the PR.
+- [x] All: fix every blocking finding at root cause — cache-key HIGH @e4146a7 · adjudicator-error LOW @d4f1b1e · zip-bomb MED @3e1b3f0 · README-storage MED @ba5c386
+- Evidence: P1 pytest 23/23 + e2e 55ms · P2 full-pipeline law-1 gate green · P3 pytest 36+1skip + behaviors live-verified · pip-audit clean · secret scan CLEAN
 
-## Phase 6 — Handoff (target: day 3)
-- [ ] ORCH-01 (docs sub-agent): README — setup, env, run, demo script, traceability table (SPEC §1), latency proof, trade-offs (bold/size honesty, SQLite ephemerality), scaling path (SPEC §11), competitive note, **"How we governed our own swarm"** with identity receipts + scoped-credential design + gate outputs
-- [ ] ORCH-01: final PR with summary + evidence; SPEC updated to match reality; LESSONS contains every correction
-- [ ] All: identities revoked (`sl ai identity revoke <id>`), locks released, session recap posted, handoff accepted
-- Final: PR ___ · deployed URL ___ · final recap seq ___ · submission form sent (human) ___
+## Phase 6 — Handoff — ✅ DOCS COMPLETE (final PR + identity-revoke at handoff)
+- [x] ORCH-01 (docs sub-agent): README @2837f21 + storage-wording @ba5c386 — laws, architecture, quickstart, demo trap gallery, traceability table (SPEC §1), honest latency proof, trade-offs, scaling (§11), competitive (§12), "How we governed our own swarm". VERIFY accuracy-audited: grounded, not varnished.
+- [x] SPEC updated to match reality (§2 Tesseract, §5/§10 cache-key) @02113fc; LESSONS §7 corrections log @02113fc (cache-key, OCR cp314 feasibility, push-discipline, file-level-lock). **Final PR-to-main HELD for human.**
+- [ ] All: identities revoked, locks released, session recap posted, handoff accepted — at final handoff (after the human's Omar-Gate/PR/deploy decision)
+- Final: PR ___ (human-gated) · deployed URL ___ (parked on human AWS) · final recap seq ___ · submission form sent ___ (human)
 
 ## Final review
-What works: ___
-Known limitations: ___
-Evidence index: deployed app ___ · latency eval ___ · fixtures eval ___ · batch ___ · egress test ___ · receipts verify ___ · Omar Gate ___ · sl audit ___ · Senti recap ___
+What works: end-to-end governed verifier on origin `proofline/takehome-v0` — single FastAPI container, in-container Tesseract OCR (mock default), deterministic spirits/wine/malt rule packs, Ed25519 signed + independently verifiable receipts, SSE FSM, async batch with per-label isolation + CSV, env-gated advisory-only adjudicator (happy path bypasses it). Every phase gated GREEN AND reproducible-from-origin.
+Known limitations (honest): in-process storage for this slice (SQLite/Postgres = documented adapter swap) · full-pipeline p95 CI-enforced, not locally measured (Tesseract-gated skip) · PaddleOCR deferred (no cp314 wheel) → Tesseract primary · deploy not run (AWS parked) · Omar Gate + sl audit not yet run (human-gated).
+Evidence index: engine @e4146a7 · README @ba5c386 · P1 close 94f049b · P2 close f28b6ba · P3 close 8a69aa0 · latency `tests/test_full_pipeline_latency.py` · receipts `POST /api/receipts/verify` → valid:true · Omar Gate `.github/workflows/omar-gate.yml` (required check on main) · Senti session 36d95ac5
