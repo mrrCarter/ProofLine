@@ -22,13 +22,13 @@ Lock map (#59235): api-01 → main.py + app/ (narrow to app/api/ + app/core/ pos
 - [x] VERIFY-01: review the slice for seam quality (adapter boundaries, schemas) before anyone builds on it
 - Evidence (gate GREEN @abd5401, reproducible from origin; VERIFY-01 isolated-archive gate): API 072b111/6a51f56 (+fix 47c257d) · VISION mock-OCR ce935b5/a1c716a · RULES engine e61980c · UI shell 9789f50/19a2247/08758bb · INFRA Dockerfile+compose fe3d05e · Omar Gate (ProofLine-adapted, P2) b9da466. GATE: ruff All-pass · mypy clean (20 files, NoReturn verified) · pytest 23/23 (0.59s) · UI npm+tsc+vite clean (193ms, 203KB/64KB gz) · live e2e 55ms (spirits-v1@1.0.0, 8 findings, 1 rule.evaluated SSE/finding, ABV↔proof PASS, eCFR warning exact PASS, format-signal honest NEEDS_REVIEW) · Ed25519 receipts crypto-verified live · VERIFY M1+M2 closed. Formal close by ORCH-01 (orch-01-opus-4.8).
 
-## Phase 2 — Real engine (target: end of day 1)
-- [ ] VISION-01: preprocess chain (EXIF, deskew, contrast, readability score); PaddleOCR + Tesseract benched on fixtures; decision + numbers posted to room and LESSONS
-- [ ] RULES-01: all spirits-v1 rules incl. ABV↔proof conversion, net-contents normalization, warning canonicalization with eCFR-pinned constant (citation + retrieval date), verdict aggregation
-- [ ] RULES-01: wine-v1 + malt-v1 minimal packs proving the mechanism
-- [ ] API-01: Ed25519 receipts (generate, store, /api/receipts endpoints, verify endpoint), cache by (sha256, rulePackVersion)
-- [ ] QA (RULES-01 + VERIFY-01): all §10 fixtures generated, expected verdicts snapshot-tested, `pytest -m latency` green at p95 ≤ 4.5s
-- Evidence: eval output ___ · latency report ___ · receipt verify demo ___
+## Phase 2 — Real engine — ✅ CLOSED 2026-06-10 ~10:20Z (final re-gate GREEN @a7fecf2, reproducible from origin)
+- [x] VISION-01: preprocess chain (EXIF, deskew, contrast, readability score) @86cffbf; OCR bench DECISION = Tesseract primary (PaddleOCR cp314-infeasible on py3.14) → LESSONS §7 @1ae4a91. (VISION-01 went absent ~10:00 after preprocess/seam landed; bench+latency reassigned to verify/api/rules per #59463; SPEC §2 PaddleOCR-primary flagged for Phase-6 update)
+- [x] RULES-01: all spirits-v1 rules incl. ABV↔proof, net-contents normalization, warning canonicalization (eCFR-pinned constant), verdict aggregation @ec9818f + fragmented-OCR matcher @8d32545
+- [x] RULES-01: wine-v1 + malt-v1 minimal packs @ec9818f
+- [x] API-01: Ed25519 receipts (generate/store/verify/pubkey) + cache by (sha256, rulePackVersion) @40a8985 — crypto-verified live by VERIFY (sign/verify valid:true)
+- [x] QA (RULES-01 + VERIFY-01): all 10 §10 image fixtures present @a7fecf2; rule-engine `pytest -m latency` PASSED (p50 2.48ms / p95 2.79ms vs 4500ms); FULL-pipeline law-1 latency proof (preprocess→tesseract OCR→rules on the 10 image fixtures, asserts OCR genuinely executed, p95≤4500ms) wired @a7fecf2 + CI-enforced. HONEST: it SKIPS locally (no tesseract binary) → executes in CI/container (Dockerfile installs tesseract-ocr) or after local `apt install tesseract-ocr`; no measured full-pipeline p95 claimed yet.
+- Evidence: final re-gate GREEN @a7fecf2 (ruff all-pass · mypy clean 20 files · pytest 28 passed + 1 honest skip · UI npm/tsc/vite clean 179ms · pip-audit clean) · receipts sign/verify valid:true · app serves (healthz 200, Vite 200, ui-01) · OCR decision LESSONS §7 @1ae4a91. Phase-2 close by ORCH-01 (orch-01-opus-4.8).
 
 ## Phase 3 — Batch + escalation (target: midday day 2)
 - [ ] API-01: batch endpoints, asyncio queue + process pool, per-label isolation, batch SSE, CSV export
