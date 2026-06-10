@@ -49,3 +49,13 @@ Durable rules for every agent in this repo. Read at session start and before mar
 
 ## 7. Corrections log
 (Append dated entries here during the build: what went wrong, the rule that prevents it.)
+
+### 2026-06-10 — OCR provider decision: Tesseract primary, PaddleOCR rejected for this stack (room #59668/#59669)
+
+**What happened.** SPEC §2 specified PaddleOCR as the primary OCR with Tesseract fallback. A feasibility audit before the bench (VERIFY-01, room #59668) found that `paddlepaddle` — PaddleOCR's required runtime — ships **no wheel for CPython 3.14** (`pip index versions paddlepaddle` → "No matching distribution found"), while both the dev hosts and the container base image (`python:3.14-slim`, Dockerfile line 10) run 3.14. PaddleOCR-as-primary was therefore uninstallable on the entire stack, and the planned accuracy bench (Paddle vs Tesseract on fixtures) could not be run at all.
+
+**Decision (ORCH-01, #59669; human may override).** Tesseract becomes the primary in-container OCR: `tesseract-ocr` is already apt-installed in the Dockerfile (line 17) and `pytesseract` 0.3.13 imports cleanly. PaddleOCR is kept as a documented, env-gated upgrade adapter behind the existing `VisionProvider` seam (commit 86cffbf) — it becomes viable when paddlepaddle ships cp314 wheels, or by pinning the container to a Python version paddlepaddle supports (e.g. 3.12), at which point the deferred accuracy bench should actually be run.
+
+**Honesty note.** This was an evidence-driven *installability* decision, not an accuracy comparison — Paddle could not run here to be benched. README and interview answers must say exactly that; do not retro-fit an accuracy rationale. SPEC §2 deviates from reality until amended (flagged to ORCH-01 for the Phase-6 SPEC update).
+
+**The rule that prevents recurrence.** Before declaring any native-wheel dependency a *primary* provider in a spec, verify wheel availability against the exact runtime Python of the target base image (`pip index versions <pkg>` is enough). Architecture decisions about heavy native deps are feasibility-gated first, accuracy-gated second.
