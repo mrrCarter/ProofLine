@@ -7,11 +7,13 @@ import {
   FileImage,
   FileText,
   Loader2,
+  Maximize2,
   Play,
   UploadCloud,
+  X,
   XCircle
 } from "lucide-react";
-import { ChangeEvent, FormEvent, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type Verdict = "PASS" | "FAIL" | "NEEDS_REVIEW" | "UNREADABLE" | "ERROR" | null;
 type TerminalVerdict = Exclude<Verdict, null>;
@@ -286,6 +288,12 @@ function stringifyError(caught: unknown, fallback: string): string {
   return caught instanceof Error ? caught.message : fallback;
 }
 
+function canPreviewFile(file: File): boolean {
+  const name = file.name.toLowerCase();
+  if (file.type === "image/heic" || file.type === "image/heif" || /\.(heic|heif)$/.test(name)) return false;
+  return file.type.startsWith("image/") || /\.(png|jpe?g|webp|gif)$/.test(name);
+}
+
 async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => {
@@ -482,6 +490,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [preparingSampleId, setPreparingSampleId] = useState<string | null>(null);
   const [batchRows, setBatchRows] = useState<BatchRow[]>([]);
   const [batchTimeline, setBatchTimeline] = useState<TimelineEvent[]>([]);
@@ -505,6 +514,30 @@ function App() {
   }, [batchFile]);
 
   const terminalVerdict = runState?.verdict ?? null;
+
+  const filePreviewUrl = useMemo(() => {
+    if (!file || !canPreviewFile(file)) return null;
+    return URL.createObjectURL(file);
+  }, [file]);
+
+  useEffect(() => {
+    return () => {
+      if (filePreviewUrl) URL.revokeObjectURL(filePreviewUrl);
+    };
+  }, [filePreviewUrl]);
+
+  useEffect(() => {
+    if (!isPreviewOpen) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setIsPreviewOpen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isPreviewOpen]);
+
+  useEffect(() => {
+    if (!filePreviewUrl && isPreviewOpen) setIsPreviewOpen(false);
+  }, [filePreviewUrl, isPreviewOpen]);
 
   const filteredBatchRows = useMemo(() => {
     if (batchFilter === "ALL") return batchRows;
@@ -542,6 +575,7 @@ function App() {
     setTimeline([]);
     setRunState(null);
     setError(null);
+    setIsPreviewOpen(false);
     try {
       setFile(await labelImageFile(sample));
     } finally {
@@ -555,6 +589,7 @@ function App() {
     setTimeline([]);
     setRunState(null);
     setError(null);
+    setIsPreviewOpen(false);
   }
 
   function onBatchFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -576,6 +611,7 @@ function App() {
       setTimeline([]);
       setRunState(null);
       setError(null);
+      setIsPreviewOpen(false);
     }
   }
 
@@ -923,6 +959,31 @@ function App() {
                 <span className="drop-file">{selectedFileLabel}</span>
               </label>
 
+              {file ? (
+                <div className="upload-preview" aria-live="polite">
+                  <button
+                    className="preview-thumb"
+                    type="button"
+                    disabled={!filePreviewUrl}
+                    aria-label={filePreviewUrl ? `Expand uploaded label ${file.name}` : `Preview unavailable for ${file.name}`}
+                    onClick={() => setIsPreviewOpen(true)}
+                  >
+                    {filePreviewUrl ? <img src={filePreviewUrl} alt="" /> : <FileImage size={30} aria-hidden="true" />}
+                    {filePreviewUrl ? (
+                      <span className="preview-expand" aria-hidden="true">
+                        <Maximize2 size={14} />
+                        Expand
+                      </span>
+                    ) : null}
+                  </button>
+                  <div className="preview-details">
+                    <p>Selected label</p>
+                    <strong>{file.name}</strong>
+                    <span>{filePreviewUrl ? "Click the thumbnail to inspect before verifying." : "Preview unavailable for this file type; filename is retained for the receipt."}</span>
+                  </div>
+                </div>
+              ) : null}
+
               <div className="sample-strip" aria-label="Try these">
                 {samples.map((sample) => (
                   <button
@@ -1148,6 +1209,20 @@ function App() {
           </section>
         </>
       )}
+
+      {isPreviewOpen && filePreviewUrl ? (
+        <div className="preview-dialog-backdrop" role="presentation" onClick={() => setIsPreviewOpen(false)}>
+          <div className="preview-dialog" role="dialog" aria-modal="true" aria-label="Uploaded label preview" onClick={(event) => event.stopPropagation()}>
+            <div className="preview-dialog-bar">
+              <strong>{file?.name ?? "Uploaded label"}</strong>
+              <button className="mini-icon-button" type="button" aria-label="Close preview" onClick={() => setIsPreviewOpen(false)}>
+                <X size={18} aria-hidden="true" />
+              </button>
+            </div>
+            <img src={filePreviewUrl} alt={`Uploaded label preview for ${file?.name ?? "selected label"}`} />
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
