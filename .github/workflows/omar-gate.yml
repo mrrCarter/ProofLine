@@ -25,7 +25,7 @@ on:
       severity_gate:
         description: Severity threshold that blocks merge
         required: false
-        default: P2
+        default: P1
         type: choice
         options:
           - P0
@@ -176,12 +176,12 @@ jobs:
         shell: bash
         env:
           RAW_SCAN_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.scan_mode || 'deep' }}
-          RAW_SEVERITY_GATE: ${{ github.event_name == 'workflow_dispatch' && inputs.severity_gate || 'P2' }}
+          RAW_SEVERITY_GATE: ${{ github.event_name == 'workflow_dispatch' && inputs.severity_gate || 'P1' }}
           RAW_P2_MAX: ${{ github.event_name == 'workflow_dispatch' && inputs.p2_max_allowed || '5' }}
         run: |-
           set -euo pipefail
           scan_mode="${RAW_SCAN_MODE:-deep}"
-          severity_gate="${RAW_SEVERITY_GATE:-P2}"
+          severity_gate="${RAW_SEVERITY_GATE:-P1}"
           p2_max="${RAW_P2_MAX:-5}"
 
           case "${scan_mode}" in
