@@ -37,7 +37,7 @@ Durable rules for every agent in this repo. Read at session start and before mar
 1. One container, one service. SQLite + local artifacts. In-process asyncio queue + process pool for OCR. Anyone proposing Redis/Postgres/external queue for the prototype must bring a grader-visible benefit to the room first.
 2. Provider adapters are mandatory; core logic imports interfaces, not SDKs. The default path makes zero outbound calls.
 3. Latency budget is a CI gate (`pytest -m latency`, p95 ≤ 4.5s on fixtures). A feature that breaks the budget is a regression, not a feature.
-4. Cache verdicts by (artifactSha256, rulePackVersion). Idempotency via request IDs and hashes.
+4. Cache verdicts by (artifactSha256, normalizedApplicationDataHash, rulePackVersion). Idempotency via request IDs and hashes. Same image with different application fields must recompute; otherwise the system can mint a signed receipt for the wrong application data.
 5. Failure modes are explicit and typed: provider timeout, unreadable, low confidence, rule conflict, validation error, unsupported file. SSE events narrate the FSM; the FSM decides when agents enter.
 
 ## 6. Engineering bar
@@ -56,6 +56,30 @@ Durable rules for every agent in this repo. Read at session start and before mar
 
 **Decision (ORCH-01, #59669; human may override).** Tesseract becomes the primary in-container OCR: `tesseract-ocr` is already apt-installed in the Dockerfile (line 17) and `pytesseract` 0.3.13 imports cleanly. PaddleOCR is kept as a documented, env-gated upgrade adapter behind the existing `VisionProvider` seam (commit 86cffbf) — it becomes viable when paddlepaddle ships cp314 wheels, or by pinning the container to a Python version paddlepaddle supports (e.g. 3.12), at which point the deferred accuracy bench should actually be run.
 
-**Honesty note.** This was an evidence-driven *installability* decision, not an accuracy comparison — Paddle could not run here to be benched. README and interview answers must say exactly that; do not retro-fit an accuracy rationale. SPEC §2 deviates from reality until amended (flagged to ORCH-01 for the Phase-6 SPEC update).
+**Honesty note.** This was an evidence-driven *installability* decision, not an accuracy comparison — Paddle could not run here to be benched. README and interview answers must say exactly that; do not retro-fit an accuracy rationale. SPEC §2 was amended in Phase 6 to make Tesseract primary and PaddleOCR the env-gated upgrade adapter.
 
 **The rule that prevents recurrence.** Before declaring any native-wheel dependency a *primary* provider in a spec, verify wheel availability against the exact runtime Python of the target base image (`pip index versions <pkg>` is enough). Architecture decisions about heavy native deps are feasibility-gated first, accuracy-gated second.
+
+### 2026-06-10 — Verdict cache key must include normalized application data (room #59792/#59793)
+
+**What happened.** The original SPEC §3/§5/§10 and LESSONS §5.4 said to cache by `(artifactSha256, rulePackVersion)`. VERIFY-01 found a Phase-3 HIGH: re-uploading the same label image with different application fields could return the previous verdict from cache. That would produce a signed receipt whose findings corresponded to stale application data, violating deterministic-verdict ownership and receipt integrity.
+
+**Decision.** The implementation changed the cache key to `(artifactSha256, normalizedApplicationDataHash, rulePackVersion)` at commit e4146a7. The application-data hash uses canonical JSON over normalized application fields. VERIFY proved the fix by inversion: same image plus different fields recomputes and changes the finding; same image plus identical fields still cache-hits.
+
+**The rule that prevents recurrence.** Any cache key for a compliance verdict must include every input that can affect a finding or receipt. Hashing the artifact alone is not enough when application data participates in rules.
+
+### 2026-06-10 — Verified commits must not strand locally (room #59655/#59669)
+
+**What happened.** Multiple verified commits landed locally before origin advanced, which blocked other agents from rebasing and made phase gates unverifiable from origin. The risk reappeared during the full-pipeline latency split: API needed the RULES matcher from origin, not from another agent's local branch.
+
+**Decision.** Once a commit has focused evidence and is intended for the shared branch, push promptly or route immediately through the authorized GitHub lane. Every done post must name the origin SHA, not only the local SHA.
+
+**The rule that prevents recurrence.** Stranded local commits are not deliverables. Phase gates run from origin, so origin must advance as soon as a slice is verified and unblocked.
+
+### 2026-06-10 — Lock at file granularity and do not use broad directory claims (room #59669)
+
+**What happened.** RULES and API were jointly assigned the full-pipeline latency proof. API locked `tests/test_full_pipeline_latency.py` and fixtures first; RULES later took a broad `tests/` lock and produced a local commit that overlapped API-owned files. The work was recoverable, but it wasted coordination time during a deadline phase.
+
+**Decision.** ORCH split ownership: API became the single integrator for the latency harness and fixtures, while RULES owned only the `rules.py` fragmented-OCR matcher. RULES pushed the rules-only change, and API integrated the full-pipeline proof from origin.
+
+**The rule that prevents recurrence.** Lock the exact files you will edit, never a broad directory unless ORCH explicitly authorizes it. If a task spans multiple owners, one agent integrates shared files and the others land narrow prerequisite commits first.

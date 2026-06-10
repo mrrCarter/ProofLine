@@ -54,7 +54,7 @@ FastAPI (single service, single container)
    ▼
 Preprocess (Pillow/OpenCV): EXIF orient, deskew, contrast, readability score   [≤400ms]
    ▼
-OCR (in-container: PaddleOCR primary, Tesseract fallback) → words+boxes+conf   [≤2.5s]
+OCR (in-container: Tesseract primary; PaddleOCR env-gated upgrade adapter when cp314 wheels exist) → words+boxes+conf   [≤2.5s]
    ▼
 Field extraction (deterministic parsers + layout heuristics)                   [≤150ms]
    ▼
@@ -98,7 +98,7 @@ Every transition emits an SSE event. Same 6-outcome philosophy as AIdenID cleara
 | API → first verdict paint | 150ms | 300ms |
 | **Total** | **~2s** | **≤4s** (1s headroom under the 5s law) |
 
-`pytest -m latency` runs the full pipeline on 10 fixtures and **fails CI** if p95 > 4.5s. Re-verification of a seen artifact hash + same rule version returns cached verdict in <300ms.
+`pytest -m latency` runs the full pipeline on 10 fixtures and **fails CI** if p95 > 4.5s. Re-verification of a seen artifact hash + same normalized application-data hash + same rule version returns cached verdict in <300ms.
 
 Batch math, stated honestly in README: 300 labels on a 2-vCPU Fargate task with 2 OCR workers ≈ 5–6 min with live per-label progress; 4 vCPU halves it; production path is horizontal workers (§11).
 
@@ -151,7 +151,7 @@ Per run, generate and store:
   "runId": "...", "requestId": "...",
   "artifactSha256": "...",
   "rulePack": "spirits-v1@1.0.0",
-  "providers": {"ocr": "paddleocr@x.y (local)", "adjudicator": null},
+  "providers": {"ocr": "tesseract@x.y (local)", "adjudicator": null},
   "verdict": "FAIL",
   "findings": [ ...full findings... ],
   "timings": {"totalMs": 2140, "stages": {...}},
@@ -160,7 +160,7 @@ Per run, generate and store:
 }
 ```
 
-Sign canonical JSON with Ed25519 (PyNaCl). Endpoints: `GET /api/receipts/:runId`, `GET /api/receipts/pubkey`, `POST /api/receipts/verify`. README includes a 5-line verification snippet. Interview line: "any verdict can be independently re-verified years later — same pattern as AIdenID's clearance receipts." ~1 hour of work, infinite differentiation.
+Sign canonical JSON with Ed25519 (PyNaCl). Result-cache key is `(artifactSha256, normalizedApplicationDataHash, rulePackVersion)`; the application-data hash is computed from normalized application fields with canonical JSON ordering. Endpoints: `GET /api/receipts/:runId`, `GET /api/receipts/pubkey`, `POST /api/receipts/verify`. README includes a 5-line verification snippet. Interview line: "any verdict can be independently re-verified years later — same pattern as AIdenID's clearance receipts." ~1 hour of work, infinite differentiation.
 
 ---
 
@@ -231,7 +231,9 @@ Generated fixture set (AI image gen per the assessment's own suggestion), each w
 10. `import_missing_origin` — FAIL
 11. `glare_low_confidence` — UNREADABLE/NEEDS_REVIEW
 12. `wine_basic` + `malt_basic` — rule-pack mechanism proof
-13. `batch_mixed_50.zip` — throughput + isolation demo
+13. `batch_mixed_50.zip` — synthetic 50-label throughput + isolation demo
+
+Cache-key regression: same image + same normalized application data may cache; same image + different normalized application data must recompute and can produce a different verdict/receipt.
 
 Gates: pytest unit+eval, `pytest -m latency` (§3), Playwright smoke (desktop + Mobile Chrome), axe, lint/typecheck/build, pip-audit, Omar Gate. All green before "done" exists.
 
