@@ -4,7 +4,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - VISION_PROVIDER=mock
+      - VISION_PROVIDER=local
       - PROOFLINE_ENV=development
       - PROOFLINE_ALLOW_EPHEMERAL_RECEIPTS=true
       - PROOFLINE_PUBLIC_KEY_ID=proofline-dev-ephemeral

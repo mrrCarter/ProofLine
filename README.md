@@ -45,7 +45,7 @@ Verdict + Ed25519 receipt ─────────────► SSE event s
 ```
 
 - **One container, one service.** No Redis, no Postgres, no external queue in the prototype. Storage is in-process for this slice, scoped deliberately (see Honest trade-offs); the storage and queue **seams** are the production seams (see Scaling path).
-- **Provider seam.** Core logic imports the `VisionProvider` interface, never an OCR SDK directly. `VISION_PROVIDER` selects the implementation (`mock` default for deterministic tests/demo, `local` for real Tesseract). PaddleOCR and cloud adapters live behind the same seam.
+- **Provider seam.** Core logic imports the `VisionProvider` interface, never an OCR SDK directly. `VISION_PROVIDER` selects the implementation (`local` for real Tesseract in the runnable container, `mock` for deterministic tests/fixtures). PaddleOCR and cloud adapters live behind the same seam.
 - **Runtime FSM:** `RECEIVED → PREPROCESSED → EXTRACTED → RULED → {PASS | FAIL | NEEDS_REVIEW | UNREADABLE}`, with `RULED → ESCALATED → ADJUDICATED → NEEDS_REVIEW(annotated)` and `* → ERROR`. Every transition emits an SSE event, so the governance is *visible*, not narrated.
 
 Real module layout (origin `proofline/takehome-v0`):
@@ -60,7 +60,7 @@ app/core/fsm.py                 # RuntimeState enum
 app/core/constants.py           # 27 CFR 16.21 warning text, pinned w/ source URL + retrieval date
 app/services/vision_provider.py # VisionProvider ABC + OCR result schemas
 app/services/factory.py         # get_vision_provider() — env-gated provider selection
-app/services/mock_vision.py     # deterministic OCR fixtures (default)
+app/services/mock_vision.py     # deterministic OCR fixtures (test provider)
 app/services/local_vision.py    # Pillow preprocess + Tesseract OCR (VISION_PROVIDER=local)
 app/services/preprocess.py      # EXIF/normalize/readability scoring
 app/services/rules.py           # RuleEngine: per-rule evaluators + verdict aggregation
@@ -88,7 +88,7 @@ docker compose up --build
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `VISION_PROVIDER` | `mock` | OCR provider: `mock` (deterministic fixtures) or `local` (real Tesseract). Compose sets `mock` for a hermetic dev demo; a submitted temp URL should use `local`. |
+| `VISION_PROVIDER` | `local` in compose / `mock` in code when unset | OCR provider: `local` (real Tesseract) or `mock` (deterministic fixtures). Compose runs the real in-container OCR path; tests can still override to `mock`. |
 | `UI_STATIC_DIR` | `/app/static` (compose) / `static` (code) | Directory the built SPA is served from. |
 | `BUILD_SHA` | `dev` | Surfaced in `/healthz`. |
 | `PROOFLINE_BATCH_WORKERS` | `2` (clamped 1–4) | OCR worker count for the batch `ProcessPoolExecutor`. |
@@ -103,7 +103,7 @@ docker compose up --build
 | `PROOFLINE_ADJUDICATOR_CIRCUIT_FAILURES` | `3` | Failures before the circuit opens. |
 | `PROOFLINE_ADJUDICATOR_CIRCUIT_COOLDOWN_SECONDS` | `60` | Circuit-open cooldown. |
 
-To run with real OCR instead of the deterministic mock, set `VISION_PROVIDER=local` (the container already has the `tesseract-ocr` binary). For any submitted temp URL or restart-safe demo, also set a stable receipt key:
+Compose runs real Tesseract OCR by default (`VISION_PROVIDER=local`; the container already has the `tesseract-ocr` binary). To force deterministic fixture OCR for local debugging, set `VISION_PROVIDER=mock`. For any submitted temp URL or restart-safe demo, also set a stable receipt key:
 
 ```bash
 export PROOFLINE_ENV=production
@@ -294,7 +294,7 @@ These are deliberate and documented. Fake completeness loses to honest limits wi
 - **No measured full-pipeline p95 is claimed as a hard number.** Only the rule-engine stage (2.79 ms p95) plus the CI-enforced ≤ 4500 ms budget — because the full-pipeline test skips where Tesseract is absent (see Latency proof).
 - **Bold and type-size from a photo are honest signals, never silent passes.** A photograph cannot prove font weight or millimetre type size. `boldSignal` is `likely | unlikely | indeterminate`; 16.22 size is a relative ratio; uncertainty routes to NEEDS_REVIEW with the crop, never a hard FAIL on formatting alone.
 - **The VLM adjudicator is advisory and off by default.** It is wired *only* after a deterministic NEEDS_REVIEW, is env-gated OFF, has a 10 s timeout and a circuit breaker, and can only annotate toward NEEDS_REVIEW — it can never flip a deterministic PASS/FAIL. The happy path never waits on it.
-- **The local compose demo runs `VISION_PROVIDER=mock` and explicitly dev-only ephemeral receipts** for deterministic, hermetic behavior; submitted demos should run `VISION_PROVIDER=local` with `PROOFLINE_ENV=production`, a stable receipt seed, and a stable `PROOFLINE_PUBLIC_KEY_ID`. Both OCR modes honor law 2 (zero required outbound), but only the stable-key path gives restart-stable receipt verification.
+- **The local compose demo runs `VISION_PROVIDER=local` and explicitly dev-only ephemeral receipts** so uploads exercise real in-container Tesseract without needing a local host install. Deterministic `mock` remains available for tests and fixture debugging. Submitted demos should additionally run `PROOFLINE_ENV=production` with a stable receipt seed and `PROOFLINE_PUBLIC_KEY_ID`; both OCR modes honor law 2 (zero required outbound), but only the stable-key path gives restart-stable receipt verification.
 - **Container base-image digests and apt OCR package versions are pinned for reproducibility.** For this take-home prototype, CVE/base refresh happens as a reviewed PR when rebuilding the image; an automated refresh bot is intentionally out of scope.
 - **No live deployed URL.** AWS deploy is parked pending credentials; the scaling path is written, not deployed. Everything in this README is reproducible from origin with `docker compose up` and `pytest`.
 
