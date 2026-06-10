@@ -6,6 +6,9 @@ from typing import Any, Optional
 from .vision_provider import VisionProvider, VisionResponse, OCRResult, BoundingBox
 
 
+MOCK_ENGINE_VERSION = "mock-ocr-fixture@1.0.0"
+
+
 class MockVisionProvider(VisionProvider):
     def __init__(self, fixture_path: Optional[str] = None):
         if fixture_path is None:
@@ -61,6 +64,8 @@ class MockVisionProvider(VisionProvider):
                 readability_score=0.5,
                 metadata={
                     "provider": "mock",
+                    "engine": "mock",
+                    "providerVersion": MOCK_ENGINE_VERSION,
                     "status": "mock_unknown_hash",
                     "hash": artifact_hash,
                 },
@@ -77,6 +82,8 @@ class MockVisionProvider(VisionProvider):
 
         metadata = {
             "provider": "mock",
+            "engine": "mock",
+            "providerVersion": MOCK_ENGINE_VERSION,
             "status": "mock_success",
             "hash": artifact_hash,
             "fixtureId": fixture_id or artifact_hash,

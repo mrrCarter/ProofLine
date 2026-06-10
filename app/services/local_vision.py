@@ -1,12 +1,18 @@
 import hashlib
 import io
 import shutil
+import subprocess
+from functools import lru_cache
 from typing import Any, Optional
 
 from PIL import Image
 
 from .preprocess import PreprocessConfig, PreprocessError, preprocess_image
 from .vision_provider import BoundingBox, OCRResult, VisionProvider, VisionResponse
+
+
+PROVIDER_NAME = "local"
+ENGINE_NAME = "tesseract"
 
 
 class LocalVisionProvider(VisionProvider):
@@ -28,7 +34,7 @@ class LocalVisionProvider(VisionProvider):
                 results=[],
                 readability_score=0.0,
                 metadata={
-                    "provider": "local",
+                    **_provider_metadata(),
                     "status": "preprocess_error",
                     "hash": artifact_hash,
                     "errorCode": exc.code,
@@ -38,7 +44,7 @@ class LocalVisionProvider(VisionProvider):
             )
 
         metadata: dict[str, Any] = {
-            "provider": "local",
+            **_provider_metadata(),
             "hash": artifact_hash,
             "preprocess": preprocessed.metrics,
             "normalizedContentType": preprocessed.content_type,
@@ -65,7 +71,6 @@ class LocalVisionProvider(VisionProvider):
                 metadata={
                     **metadata,
                     "status": "local_ocr_unavailable",
-                    "engine": "tesseract",
                     "reason": "pytesseract_module_or_tesseract_binary_missing",
                 },
             )
@@ -77,9 +82,23 @@ class LocalVisionProvider(VisionProvider):
             metadata={
                 **metadata,
                 "status": "local_success" if results else "local_no_text",
-                "engine": "tesseract",
             },
         )
+
+
+def _provider_metadata() -> dict[str, Any]:
+    metadata = {
+        "provider": PROVIDER_NAME,
+        "engine": ENGINE_NAME,
+        "providerVersion": "local-tesseract",
+    }
+    tesseract_version = _tesseract_version()
+    pytesseract_version = _pytesseract_version()
+    if tesseract_version:
+        metadata["engineVersion"] = tesseract_version
+    if pytesseract_version:
+        metadata["pytesseractVersion"] = pytesseract_version
+    return metadata
 
 
 def _tesseract_available() -> bool:
@@ -90,6 +109,34 @@ def _tesseract_available() -> bool:
     except Exception:
         return False
     return True
+
+
+@lru_cache(maxsize=1)
+def _tesseract_version() -> str | None:
+    binary = shutil.which("tesseract")
+    if binary is None:
+        return None
+    try:
+        completed = subprocess.run(
+            [binary, "--version"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    first_line = ((completed.stdout or completed.stderr).splitlines() or [""])[0].strip()
+    return first_line or None
+
+
+@lru_cache(maxsize=1)
+def _pytesseract_version() -> str | None:
+    try:
+        import pytesseract  # type: ignore[import-not-found,import-untyped]
+    except Exception:
+        return None
+    return str(getattr(pytesseract, "__version__", "")).strip() or None
 
 
 def _run_tesseract(image_bytes: bytes) -> list[OCRResult]:
