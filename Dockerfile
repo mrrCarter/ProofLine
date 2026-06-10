@@ -21,7 +21,7 @@ RUN groupadd --system proofline \
     && useradd --system --gid proofline --home-dir /app --shell /usr/sbin/nologin proofline
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 
 # Copy backend code
 COPY --chown=proofline:proofline . .
@@ -34,4 +34,4 @@ EXPOSE 8000
 
 # Run with uvicorn
 USER proofline
-CMD ["python", "main.py"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
