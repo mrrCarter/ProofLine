@@ -1,7 +1,10 @@
+import io
 import json
 import time
+import zipfile
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.api.endpoints import batches as batch_endpoint
@@ -22,6 +25,14 @@ def _minimal_png() -> bytes:
         "0000000a49444154789c6360000002000100ffff03000006000557bfab9d"
         "0000000049454e44ae426082"
     )
+
+
+def _zip_bytes(members: dict[str, bytes], compression: int = zipfile.ZIP_STORED) -> bytes:
+    archive_bytes = io.BytesIO()
+    with zipfile.ZipFile(archive_bytes, "w", compression=compression) as archive:
+        for filename, content in members.items():
+            archive.writestr(filename, content)
+    return archive_bytes.getvalue()
 
 
 def _terminal_batch(client: TestClient, batch_id: str) -> dict:
@@ -93,16 +104,10 @@ def test_batch_events_stream_to_completion():
 def test_batch_accepts_zip_upload():
     client = _client()
     fixture = Path("app/services/fixtures/pass_bourbon.png").read_bytes()
-    import io
-    import zipfile
-
-    archive_bytes = io.BytesIO()
-    with zipfile.ZipFile(archive_bytes, "w") as archive:
-        archive.writestr("pass_bourbon.png", fixture)
 
     response = client.post(
         "/api/batches",
-        files=[("files", ("labels.zip", archive_bytes.getvalue(), "application/zip"))],
+        files=[("files", ("labels.zip", _zip_bytes({"pass_bourbon.png": fixture}), "application/zip"))],
         data={
             "application_data": json.dumps(
                 {
@@ -121,3 +126,51 @@ def test_batch_accepts_zip_upload():
     assert sum(batch["counts"].values()) == 1
     assert batch["items"][0]["runId"] in run_endpoint.runs
     assert batch["items"][0]["receiptRef"] == f"/api/receipts/{batch['items'][0]['runId']}"
+
+
+def test_batch_rejects_zip_member_above_limit(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(batch_endpoint, "MAX_ZIP_MEMBER_BYTES", 4)
+    response = _client().post(
+        "/api/batches",
+        files=[("files", ("labels.zip", _zip_bytes({"huge-label.png": b"12345"}), "application/zip"))],
+    )
+
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "ZIP_MEMBER_TOO_LARGE"
+    assert response.json()["error"]["details"]["member"] == "huge-label.png"
+
+
+def test_batch_rejects_zip_total_expanded_size(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(batch_endpoint, "MAX_ZIP_TOTAL_BYTES", 9)
+    response = _client().post(
+        "/api/batches",
+        files=[
+            (
+                "files",
+                ("labels.zip", _zip_bytes({"a.png": b"12345", "b.png": b"67890"}), "application/zip"),
+            )
+        ],
+    )
+
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "ZIP_EXPANDED_TOO_LARGE"
+
+
+def test_batch_rejects_zip_high_compression_ratio(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(batch_endpoint, "MAX_ZIP_COMPRESSION_RATIO", 2.0)
+    response = _client().post(
+        "/api/batches",
+        files=[
+            (
+                "files",
+                (
+                    "labels.zip",
+                    _zip_bytes({"compressed.png": b"A" * 200}, compression=zipfile.ZIP_DEFLATED),
+                    "application/zip",
+                ),
+            )
+        ],
+    )
+
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "ZIP_COMPRESSION_RATIO_TOO_HIGH"

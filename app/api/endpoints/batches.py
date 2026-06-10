@@ -20,6 +20,9 @@ from app.schemas.error import ErrorResponse
 router = APIRouter()
 
 MAX_BATCH_LABELS = 300
+MAX_ZIP_MEMBER_BYTES = run_endpoint.MAX_UPLOAD_BYTES
+MAX_ZIP_TOTAL_BYTES = 256 * 1024 * 1024
+MAX_ZIP_COMPRESSION_RATIO = 100.0
 BATCH_WORKERS = max(1, min(4, int(os.getenv("PROOFLINE_BATCH_WORKERS", "2"))))
 PROCESS_POOL = ProcessPoolExecutor(max_workers=BATCH_WORKERS)
 BATCH_TERMINAL_STATES = {
@@ -119,21 +122,88 @@ def _application_for_file(
     return {**base_application_data, **csv_rows.get(filename, {})}
 
 
-def _uploads_from_zip(filename: str, archive_bytes: bytes) -> list[tuple[str, bytes]]:
+def _compression_ratio(member: zipfile.ZipInfo) -> float:
+    if member.file_size == 0:
+        return 0.0
+    if member.compress_size == 0:
+        return float("inf")
+    return member.file_size / member.compress_size
+
+
+def _uploads_from_zip(
+    filename: str,
+    archive_bytes: bytes,
+    request_id: str,
+    remaining_labels: int,
+    remaining_expanded_bytes: int,
+) -> tuple[list[tuple[str, bytes]], int]:
     try:
         with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+            members = [member for member in archive.infolist() if not member.is_dir()]
+            if len(members) > remaining_labels:
+                run_endpoint._raise_error(
+                    413,
+                    "BATCH_TOO_LARGE",
+                    "Batch exceeds the 300-label prototype limit",
+                    request_id,
+                    {"maxLabels": MAX_BATCH_LABELS},
+                )
+
+            expanded_bytes = 0
+            for member in members:
+                if member.file_size > MAX_ZIP_MEMBER_BYTES:
+                    run_endpoint._raise_error(
+                        413,
+                        "ZIP_MEMBER_TOO_LARGE",
+                        "Zip member exceeds the per-label upload limit",
+                        request_id,
+                        {
+                            "filename": filename,
+                            "member": member.filename,
+                            "memberBytes": member.file_size,
+                            "maxBytes": MAX_ZIP_MEMBER_BYTES,
+                        },
+                    )
+                expanded_bytes += member.file_size
+                if expanded_bytes > remaining_expanded_bytes:
+                    run_endpoint._raise_error(
+                        413,
+                        "ZIP_EXPANDED_TOO_LARGE",
+                        "Zip archive exceeds the batch decompressed-size limit",
+                        request_id,
+                        {
+                            "filename": filename,
+                            "expandedBytes": expanded_bytes,
+                            "maxExpandedBytes": MAX_ZIP_TOTAL_BYTES,
+                        },
+                    )
+
+                ratio = _compression_ratio(member)
+                if ratio > MAX_ZIP_COMPRESSION_RATIO:
+                    run_endpoint._raise_error(
+                        413,
+                        "ZIP_COMPRESSION_RATIO_TOO_HIGH",
+                        "Zip member compression ratio is too high",
+                        request_id,
+                        {
+                            "filename": filename,
+                            "member": member.filename,
+                            "ratio": round(ratio, 2),
+                            "maxRatio": MAX_ZIP_COMPRESSION_RATIO,
+                        },
+                    )
+
             uploads: list[tuple[str, bytes]] = []
-            for member in archive.infolist():
-                if member.is_dir():
-                    continue
+            for member in members:
                 uploads.append((member.filename, archive.read(member)))
-            return uploads
+            return uploads, expanded_bytes
     except zipfile.BadZipFile:
-        return [(filename, archive_bytes)]
+        return [(filename, archive_bytes)], 0
 
 
-async def _read_uploads(files: list[UploadFile]) -> list[tuple[str, bytes]]:
+async def _read_uploads(files: list[UploadFile], request_id: str) -> list[tuple[str, bytes]]:
     uploads: list[tuple[str, bytes]] = []
+    expanded_zip_bytes = 0
     for upload in files:
         content = await upload.read()
         filename = upload.filename or "upload"
@@ -141,7 +211,15 @@ async def _read_uploads(files: list[UploadFile]) -> list[tuple[str, bytes]]:
             "application/zip",
             "application/x-zip-compressed",
         }:
-            uploads.extend(_uploads_from_zip(filename, content))
+            zip_uploads, zip_expanded_bytes = _uploads_from_zip(
+                filename,
+                content,
+                request_id,
+                MAX_BATCH_LABELS - len(uploads),
+                MAX_ZIP_TOTAL_BYTES - expanded_zip_bytes,
+            )
+            uploads.extend(zip_uploads)
+            expanded_zip_bytes += zip_expanded_bytes
         else:
             uploads.append((filename, content))
     return uploads
@@ -274,7 +352,7 @@ async def create_batch(
         run_endpoint._parse_application_data(application_data, rid)
     )
     csv_rows = _csv_application_rows(await fields_csv.read()) if fields_csv is not None else {}
-    uploads = await _read_uploads(files)
+    uploads = await _read_uploads(files, rid)
     if not uploads:
         run_endpoint._raise_error(400, "EMPTY_BATCH", "Batch contains no files", rid)
     if len(uploads) > MAX_BATCH_LABELS:
