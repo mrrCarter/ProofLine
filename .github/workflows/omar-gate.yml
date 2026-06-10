@@ -75,9 +75,13 @@ jobs:
         with:
           github_token: ${{ github.token }}
           sentinelayer_token: ${{ secrets.SENTINELAYER_TOKEN }}
-          sentinelayer_managed_llm: "false"
-          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
-          google_api_key: ${{ secrets.GOOGLE_API_KEY }}
+          # Managed LLM via the single purpose-scoped SENTINELAYER_TOKEN.
+          # The OPENAI_API_KEY / GOOGLE_API_KEY passthrough was removed: those
+          # secrets are not configured for this repo (they expanded to empty),
+          # the gate already ran through the token-managed path, and forwarding
+          # provider keys to a third-party action widened the blast radius for
+          # no benefit (Omar P2, omar-gate.yml secrets finding).
+          sentinelayer_managed_llm: "true"
           scan_mode: deep
           severity_gate: P2
           model: gpt-5.3-codex
