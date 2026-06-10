@@ -86,14 +86,14 @@ def _tesseract_available() -> bool:
     if shutil.which("tesseract") is None:
         return False
     try:
-        import pytesseract  # noqa: F401
+        import pytesseract  # type: ignore[import-not-found,import-untyped]  # noqa: F401
     except Exception:
         return False
     return True
 
 
 def _run_tesseract(image_bytes: bytes) -> list[OCRResult]:
-    import pytesseract
+    import pytesseract  # type: ignore[import-not-found,import-untyped]
 
     image = Image.open(io.BytesIO(image_bytes))
     data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
