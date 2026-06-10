@@ -1,8 +1,9 @@
-fastapi
-uvicorn[standard]
-python-multipart
-pydantic-settings
-rapidfuzz
-PyYAML
-pynacl
-pillow
+fastapi==0.124.0
+uvicorn[standard]==0.38.0
+python-multipart==0.0.32
+pydantic-settings==2.14.1
+rapidfuzz==3.14.5
+PyYAML==6.0.3
+pynacl==1.6.2
+pillow==12.2.0
+httpx==0.28.1

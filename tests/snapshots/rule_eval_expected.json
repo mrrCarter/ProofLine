@@ -1,0 +1,379 @@
+[
+  {
+    "fixtureId": "pass_bourbon",
+    "rulePack": "spirits-v1@1.0.0",
+    "verdict": "PASS",
+    "findingIds": [
+      "BRAND_NAME_MATCH",
+      "CLASS_TYPE_MATCH",
+      "ALCOHOL_CONTENT_MATCH",
+      "NET_CONTENTS_MATCH",
+      "NAME_ADDRESS_PRESENT",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT",
+      "GOVERNMENT_WARNING_PRESENT",
+      "GOVERNMENT_WARNING_EXACT_TEXT",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL",
+      "IMAGE_READABILITY"
+    ],
+    "findingStatuses": {
+      "BRAND_NAME_MATCH": "PASS",
+      "CLASS_TYPE_MATCH": "PASS",
+      "ALCOHOL_CONTENT_MATCH": "PASS",
+      "NET_CONTENTS_MATCH": "PASS",
+      "NAME_ADDRESS_PRESENT": "PASS",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT": "PASS",
+      "GOVERNMENT_WARNING_PRESENT": "PASS",
+      "GOVERNMENT_WARNING_EXACT_TEXT": "PASS",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL": "PASS",
+      "IMAGE_READABILITY": "PASS"
+    }
+  },
+  {
+    "fixtureId": "brand_case_equivalent",
+    "rulePack": "spirits-v1@1.0.0",
+    "verdict": "PASS",
+    "findingIds": [
+      "BRAND_NAME_MATCH",
+      "CLASS_TYPE_MATCH",
+      "ALCOHOL_CONTENT_MATCH",
+      "NET_CONTENTS_MATCH",
+      "NAME_ADDRESS_PRESENT",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT",
+      "GOVERNMENT_WARNING_PRESENT",
+      "GOVERNMENT_WARNING_EXACT_TEXT",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL",
+      "IMAGE_READABILITY"
+    ],
+    "findingStatuses": {
+      "BRAND_NAME_MATCH": "PASS",
+      "CLASS_TYPE_MATCH": "PASS",
+      "ALCOHOL_CONTENT_MATCH": "PASS",
+      "NET_CONTENTS_MATCH": "PASS",
+      "NAME_ADDRESS_PRESENT": "PASS",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT": "PASS",
+      "GOVERNMENT_WARNING_PRESENT": "PASS",
+      "GOVERNMENT_WARNING_EXACT_TEXT": "PASS",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL": "PASS",
+      "IMAGE_READABILITY": "PASS"
+    }
+  },
+  {
+    "fixtureId": "brand_material_mismatch",
+    "rulePack": "spirits-v1@1.0.0",
+    "verdict": "FAIL",
+    "findingIds": [
+      "BRAND_NAME_MATCH",
+      "CLASS_TYPE_MATCH",
+      "ALCOHOL_CONTENT_MATCH",
+      "NET_CONTENTS_MATCH",
+      "NAME_ADDRESS_PRESENT",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT",
+      "GOVERNMENT_WARNING_PRESENT",
+      "GOVERNMENT_WARNING_EXACT_TEXT",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL",
+      "IMAGE_READABILITY"
+    ],
+    "findingStatuses": {
+      "BRAND_NAME_MATCH": "FAIL",
+      "CLASS_TYPE_MATCH": "PASS",
+      "ALCOHOL_CONTENT_MATCH": "PASS",
+      "NET_CONTENTS_MATCH": "PASS",
+      "NAME_ADDRESS_PRESENT": "PASS",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT": "PASS",
+      "GOVERNMENT_WARNING_PRESENT": "PASS",
+      "GOVERNMENT_WARNING_EXACT_TEXT": "PASS",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL": "PASS",
+      "IMAGE_READABILITY": "PASS"
+    }
+  },
+  {
+    "fixtureId": "abv_mismatch",
+    "rulePack": "spirits-v1@1.0.0",
+    "verdict": "FAIL",
+    "findingIds": [
+      "BRAND_NAME_MATCH",
+      "CLASS_TYPE_MATCH",
+      "ALCOHOL_CONTENT_MATCH",
+      "NET_CONTENTS_MATCH",
+      "NAME_ADDRESS_PRESENT",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT",
+      "GOVERNMENT_WARNING_PRESENT",
+      "GOVERNMENT_WARNING_EXACT_TEXT",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL",
+      "IMAGE_READABILITY"
+    ],
+    "findingStatuses": {
+      "BRAND_NAME_MATCH": "PASS",
+      "CLASS_TYPE_MATCH": "PASS",
+      "ALCOHOL_CONTENT_MATCH": "FAIL",
+      "NET_CONTENTS_MATCH": "PASS",
+      "NAME_ADDRESS_PRESENT": "PASS",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT": "PASS",
+      "GOVERNMENT_WARNING_PRESENT": "PASS",
+      "GOVERNMENT_WARNING_EXACT_TEXT": "PASS",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL": "PASS",
+      "IMAGE_READABILITY": "PASS"
+    }
+  },
+  {
+    "fixtureId": "proof_only_equivalent",
+    "rulePack": "spirits-v1@1.0.0",
+    "verdict": "PASS",
+    "findingIds": [
+      "BRAND_NAME_MATCH",
+      "CLASS_TYPE_MATCH",
+      "ALCOHOL_CONTENT_MATCH",
+      "NET_CONTENTS_MATCH",
+      "NAME_ADDRESS_PRESENT",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT",
+      "GOVERNMENT_WARNING_PRESENT",
+      "GOVERNMENT_WARNING_EXACT_TEXT",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL",
+      "IMAGE_READABILITY"
+    ],
+    "findingStatuses": {
+      "BRAND_NAME_MATCH": "PASS",
+      "CLASS_TYPE_MATCH": "PASS",
+      "ALCOHOL_CONTENT_MATCH": "PASS",
+      "NET_CONTENTS_MATCH": "PASS",
+      "NAME_ADDRESS_PRESENT": "PASS",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT": "PASS",
+      "GOVERNMENT_WARNING_PRESENT": "PASS",
+      "GOVERNMENT_WARNING_EXACT_TEXT": "PASS",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL": "PASS",
+      "IMAGE_READABILITY": "PASS"
+    }
+  },
+  {
+    "fixtureId": "net_contents_unit_equiv",
+    "rulePack": "spirits-v1@1.0.0",
+    "verdict": "PASS",
+    "findingIds": [
+      "BRAND_NAME_MATCH",
+      "CLASS_TYPE_MATCH",
+      "ALCOHOL_CONTENT_MATCH",
+      "NET_CONTENTS_MATCH",
+      "NAME_ADDRESS_PRESENT",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT",
+      "GOVERNMENT_WARNING_PRESENT",
+      "GOVERNMENT_WARNING_EXACT_TEXT",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL",
+      "IMAGE_READABILITY"
+    ],
+    "findingStatuses": {
+      "BRAND_NAME_MATCH": "PASS",
+      "CLASS_TYPE_MATCH": "PASS",
+      "ALCOHOL_CONTENT_MATCH": "PASS",
+      "NET_CONTENTS_MATCH": "PASS",
+      "NAME_ADDRESS_PRESENT": "PASS",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT": "PASS",
+      "GOVERNMENT_WARNING_PRESENT": "PASS",
+      "GOVERNMENT_WARNING_EXACT_TEXT": "PASS",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL": "PASS",
+      "IMAGE_READABILITY": "PASS"
+    }
+  },
+  {
+    "fixtureId": "warning_missing",
+    "rulePack": "spirits-v1@1.0.0",
+    "verdict": "FAIL",
+    "findingIds": [
+      "BRAND_NAME_MATCH",
+      "CLASS_TYPE_MATCH",
+      "ALCOHOL_CONTENT_MATCH",
+      "NET_CONTENTS_MATCH",
+      "NAME_ADDRESS_PRESENT",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT",
+      "GOVERNMENT_WARNING_PRESENT",
+      "GOVERNMENT_WARNING_EXACT_TEXT",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL",
+      "IMAGE_READABILITY"
+    ],
+    "findingStatuses": {
+      "BRAND_NAME_MATCH": "PASS",
+      "CLASS_TYPE_MATCH": "PASS",
+      "ALCOHOL_CONTENT_MATCH": "PASS",
+      "NET_CONTENTS_MATCH": "PASS",
+      "NAME_ADDRESS_PRESENT": "PASS",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT": "PASS",
+      "GOVERNMENT_WARNING_PRESENT": "FAIL",
+      "GOVERNMENT_WARNING_EXACT_TEXT": "FAIL",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL": "PASS",
+      "IMAGE_READABILITY": "PASS"
+    }
+  },
+  {
+    "fixtureId": "warning_title_case",
+    "rulePack": "spirits-v1@1.0.0",
+    "verdict": "FAIL",
+    "findingIds": [
+      "BRAND_NAME_MATCH",
+      "CLASS_TYPE_MATCH",
+      "ALCOHOL_CONTENT_MATCH",
+      "NET_CONTENTS_MATCH",
+      "NAME_ADDRESS_PRESENT",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT",
+      "GOVERNMENT_WARNING_PRESENT",
+      "GOVERNMENT_WARNING_EXACT_TEXT",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL",
+      "IMAGE_READABILITY"
+    ],
+    "findingStatuses": {
+      "BRAND_NAME_MATCH": "PASS",
+      "CLASS_TYPE_MATCH": "PASS",
+      "ALCOHOL_CONTENT_MATCH": "PASS",
+      "NET_CONTENTS_MATCH": "PASS",
+      "NAME_ADDRESS_PRESENT": "PASS",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT": "PASS",
+      "GOVERNMENT_WARNING_PRESENT": "PASS",
+      "GOVERNMENT_WARNING_EXACT_TEXT": "FAIL",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL": "PASS",
+      "IMAGE_READABILITY": "PASS"
+    }
+  },
+  {
+    "fixtureId": "warning_small_font_signal",
+    "rulePack": "spirits-v1@1.0.0",
+    "verdict": "NEEDS_REVIEW",
+    "findingIds": [
+      "BRAND_NAME_MATCH",
+      "CLASS_TYPE_MATCH",
+      "ALCOHOL_CONTENT_MATCH",
+      "NET_CONTENTS_MATCH",
+      "NAME_ADDRESS_PRESENT",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT",
+      "GOVERNMENT_WARNING_PRESENT",
+      "GOVERNMENT_WARNING_EXACT_TEXT",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL",
+      "IMAGE_READABILITY"
+    ],
+    "findingStatuses": {
+      "BRAND_NAME_MATCH": "PASS",
+      "CLASS_TYPE_MATCH": "PASS",
+      "ALCOHOL_CONTENT_MATCH": "PASS",
+      "NET_CONTENTS_MATCH": "PASS",
+      "NAME_ADDRESS_PRESENT": "PASS",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT": "PASS",
+      "GOVERNMENT_WARNING_PRESENT": "PASS",
+      "GOVERNMENT_WARNING_EXACT_TEXT": "PASS",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL": "NEEDS_REVIEW",
+      "IMAGE_READABILITY": "PASS"
+    }
+  },
+  {
+    "fixtureId": "import_missing_origin",
+    "rulePack": "spirits-v1@1.0.0",
+    "verdict": "FAIL",
+    "findingIds": [
+      "BRAND_NAME_MATCH",
+      "CLASS_TYPE_MATCH",
+      "ALCOHOL_CONTENT_MATCH",
+      "NET_CONTENTS_MATCH",
+      "NAME_ADDRESS_PRESENT",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT",
+      "GOVERNMENT_WARNING_PRESENT",
+      "GOVERNMENT_WARNING_EXACT_TEXT",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL",
+      "IMAGE_READABILITY"
+    ],
+    "findingStatuses": {
+      "BRAND_NAME_MATCH": "PASS",
+      "CLASS_TYPE_MATCH": "PASS",
+      "ALCOHOL_CONTENT_MATCH": "PASS",
+      "NET_CONTENTS_MATCH": "PASS",
+      "NAME_ADDRESS_PRESENT": "PASS",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT": "FAIL",
+      "GOVERNMENT_WARNING_PRESENT": "PASS",
+      "GOVERNMENT_WARNING_EXACT_TEXT": "PASS",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL": "PASS",
+      "IMAGE_READABILITY": "PASS"
+    }
+  },
+  {
+    "fixtureId": "glare_low_confidence",
+    "rulePack": "spirits-v1@1.0.0",
+    "verdict": "UNREADABLE",
+    "findingIds": [
+      "BRAND_NAME_MATCH",
+      "CLASS_TYPE_MATCH",
+      "ALCOHOL_CONTENT_MATCH",
+      "NET_CONTENTS_MATCH",
+      "NAME_ADDRESS_PRESENT",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT",
+      "GOVERNMENT_WARNING_PRESENT",
+      "GOVERNMENT_WARNING_EXACT_TEXT",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL",
+      "IMAGE_READABILITY"
+    ],
+    "findingStatuses": {
+      "BRAND_NAME_MATCH": "PASS",
+      "CLASS_TYPE_MATCH": "PASS",
+      "ALCOHOL_CONTENT_MATCH": "PASS",
+      "NET_CONTENTS_MATCH": "PASS",
+      "NAME_ADDRESS_PRESENT": "PASS",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT": "PASS",
+      "GOVERNMENT_WARNING_PRESENT": "PASS",
+      "GOVERNMENT_WARNING_EXACT_TEXT": "PASS",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL": "PASS",
+      "IMAGE_READABILITY": "UNREADABLE"
+    }
+  },
+  {
+    "fixtureId": "wine_basic",
+    "rulePack": "wine-v1@1.0.0",
+    "verdict": "PASS",
+    "findingIds": [
+      "BRAND_NAME_MATCH",
+      "CLASS_TYPE_MATCH",
+      "ALCOHOL_CONTENT_MATCH",
+      "NET_CONTENTS_MATCH",
+      "NAME_ADDRESS_PRESENT",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT",
+      "GOVERNMENT_WARNING_PRESENT",
+      "GOVERNMENT_WARNING_EXACT_TEXT",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL",
+      "IMAGE_READABILITY"
+    ],
+    "findingStatuses": {
+      "BRAND_NAME_MATCH": "PASS",
+      "CLASS_TYPE_MATCH": "PASS",
+      "ALCOHOL_CONTENT_MATCH": "PASS",
+      "NET_CONTENTS_MATCH": "PASS",
+      "NAME_ADDRESS_PRESENT": "PASS",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT": "PASS",
+      "GOVERNMENT_WARNING_PRESENT": "PASS",
+      "GOVERNMENT_WARNING_EXACT_TEXT": "PASS",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL": "PASS",
+      "IMAGE_READABILITY": "PASS"
+    }
+  },
+  {
+    "fixtureId": "malt_basic",
+    "rulePack": "malt-v1@1.0.0",
+    "verdict": "PASS",
+    "findingIds": [
+      "BRAND_NAME_MATCH",
+      "CLASS_TYPE_MATCH",
+      "ALCOHOL_CONTENT_MATCH",
+      "NET_CONTENTS_MATCH",
+      "NAME_ADDRESS_PRESENT",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT",
+      "GOVERNMENT_WARNING_PRESENT",
+      "GOVERNMENT_WARNING_EXACT_TEXT",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL",
+      "IMAGE_READABILITY"
+    ],
+    "findingStatuses": {
+      "BRAND_NAME_MATCH": "PASS",
+      "CLASS_TYPE_MATCH": "PASS",
+      "ALCOHOL_CONTENT_MATCH": "PASS",
+      "NET_CONTENTS_MATCH": "PASS",
+      "NAME_ADDRESS_PRESENT": "PASS",
+      "COUNTRY_OF_ORIGIN_IF_IMPORT": "PASS",
+      "GOVERNMENT_WARNING_PRESENT": "PASS",
+      "GOVERNMENT_WARNING_EXACT_TEXT": "PASS",
+      "GOVERNMENT_WARNING_FORMAT_SIGNAL": "PASS",
+      "IMAGE_READABILITY": "PASS"
+    }
+  }
+]

@@ -1,0 +1,342 @@
+[
+  {
+    "fixtureId": "pass_bourbon",
+    "rulePackPath": "rules/spirits-v1.yaml",
+    "context": {
+      "brandName": "Old Forester",
+      "classType": "Kentucky Straight Bourbon Whisky",
+      "abv": "43% ABV",
+      "netContents": "750 mL",
+      "applicantName": "Old Forester Distilling Co",
+      "city": "Louisville",
+      "state": "KY",
+      "imported": false,
+      "warningBoldSignal": "likely",
+      "warningBoldConfidence": 0.96,
+      "readabilityScore": 0.97
+    },
+    "ocr": [
+      {"text": "OLD FORESTER", "confidence": 0.98},
+      {"text": "KENTUCKY STRAIGHT BOURBON WHISKY", "confidence": 0.97},
+      {"text": "43% ALC/VOL (86 PROOF)", "confidence": 0.99},
+      {"text": "750 ML", "confidence": 0.98},
+      {"text": "Bottled by Old Forester Distilling Co. Louisville KY", "confidence": 0.96},
+      {"text": "__GOVERNMENT_WARNING__", "confidence": 0.97}
+    ],
+    "expectedVerdict": "PASS"
+  },
+  {
+    "fixtureId": "brand_case_equivalent",
+    "rulePackPath": "rules/spirits-v1.yaml",
+    "context": {
+      "brandName": "Stone's Throw",
+      "classType": "Bourbon Whisky",
+      "abv": "45% ABV",
+      "netContents": "750 mL",
+      "applicantName": "Stone Throw Distilling Co",
+      "city": "Frankfort",
+      "state": "KY",
+      "imported": false,
+      "warningBoldSignal": "likely",
+      "warningBoldConfidence": 0.94,
+      "readabilityScore": 0.96
+    },
+    "ocr": [
+      {"text": "STONE'S THROW", "confidence": 0.99},
+      {"text": "BOURBON WHISKY", "confidence": 0.96},
+      {"text": "90 PROOF", "confidence": 0.98},
+      {"text": "750 mL", "confidence": 0.97},
+      {"text": "Bottled by Stone Throw Distilling Co. Frankfort KY", "confidence": 0.95},
+      {"text": "__GOVERNMENT_WARNING__", "confidence": 0.97}
+    ],
+    "expectedVerdict": "PASS"
+  },
+  {
+    "fixtureId": "brand_material_mismatch",
+    "rulePackPath": "rules/spirits-v1.yaml",
+    "context": {
+      "brandName": "Old Forester",
+      "classType": "Bourbon Whisky",
+      "abv": "45% ABV",
+      "netContents": "750 mL",
+      "applicantName": "Other Distilling Co",
+      "city": "Frankfort",
+      "state": "KY",
+      "imported": false,
+      "warningBoldSignal": "likely",
+      "warningBoldConfidence": 0.95,
+      "readabilityScore": 0.97
+    },
+    "ocr": [
+      {"text": "OTHER WHISKEY", "confidence": 0.98},
+      {"text": "BOURBON WHISKY", "confidence": 0.96},
+      {"text": "90 PROOF", "confidence": 0.98},
+      {"text": "750 mL", "confidence": 0.97},
+      {"text": "Bottled by Other Distilling Co. Frankfort KY", "confidence": 0.95},
+      {"text": "__GOVERNMENT_WARNING__", "confidence": 0.97}
+    ],
+    "expectedVerdict": "FAIL"
+  },
+  {
+    "fixtureId": "abv_mismatch",
+    "rulePackPath": "rules/spirits-v1.yaml",
+    "context": {
+      "brandName": "Old Forester",
+      "classType": "Bourbon Whisky",
+      "abv": "45% ABV",
+      "netContents": "750 mL",
+      "applicantName": "Old Forester Distilling Co",
+      "city": "Louisville",
+      "state": "KY",
+      "imported": false,
+      "warningBoldSignal": "likely",
+      "warningBoldConfidence": 0.95,
+      "readabilityScore": 0.97
+    },
+    "ocr": [
+      {"text": "OLD FORESTER", "confidence": 0.98},
+      {"text": "BOURBON WHISKY", "confidence": 0.96},
+      {"text": "40% ALC/VOL", "confidence": 0.99},
+      {"text": "750 mL", "confidence": 0.97},
+      {"text": "Bottled by Old Forester Distilling Co. Louisville KY", "confidence": 0.95},
+      {"text": "__GOVERNMENT_WARNING__", "confidence": 0.97}
+    ],
+    "expectedVerdict": "FAIL"
+  },
+  {
+    "fixtureId": "proof_only_equivalent",
+    "rulePackPath": "rules/spirits-v1.yaml",
+    "context": {
+      "brandName": "Stone's Throw",
+      "classType": "Bourbon Whisky",
+      "abv": "45% ABV",
+      "netContents": "750 mL",
+      "applicantName": "Stone Throw Distilling Co",
+      "city": "Frankfort",
+      "state": "KY",
+      "imported": false,
+      "warningBoldSignal": "likely",
+      "warningBoldConfidence": 0.95,
+      "readabilityScore": 0.97
+    },
+    "ocr": [
+      {"text": "STONE'S THROW", "confidence": 0.98},
+      {"text": "BOURBON WHISKY", "confidence": 0.96},
+      {"text": "90 Proof", "confidence": 0.99},
+      {"text": "750 mL", "confidence": 0.97},
+      {"text": "Bottled by Stone Throw Distilling Co. Frankfort KY", "confidence": 0.95},
+      {"text": "__GOVERNMENT_WARNING__", "confidence": 0.97}
+    ],
+    "expectedVerdict": "PASS"
+  },
+  {
+    "fixtureId": "net_contents_unit_equiv",
+    "rulePackPath": "rules/spirits-v1.yaml",
+    "context": {
+      "brandName": "Old Forester",
+      "classType": "Bourbon Whisky",
+      "abv": "43% ABV",
+      "netContents": "750 mL",
+      "applicantName": "Old Forester Distilling Co",
+      "city": "Louisville",
+      "state": "KY",
+      "imported": false,
+      "warningBoldSignal": "likely",
+      "warningBoldConfidence": 0.95,
+      "readabilityScore": 0.97
+    },
+    "ocr": [
+      {"text": "OLD FORESTER", "confidence": 0.98},
+      {"text": "BOURBON WHISKY", "confidence": 0.96},
+      {"text": "43% ALC/VOL", "confidence": 0.99},
+      {"text": "75 cL", "confidence": 0.97},
+      {"text": "Bottled by Old Forester Distilling Co. Louisville KY", "confidence": 0.95},
+      {"text": "__GOVERNMENT_WARNING__", "confidence": 0.97}
+    ],
+    "expectedVerdict": "PASS"
+  },
+  {
+    "fixtureId": "warning_missing",
+    "rulePackPath": "rules/spirits-v1.yaml",
+    "context": {
+      "brandName": "Old Forester",
+      "classType": "Bourbon Whisky",
+      "abv": "43% ABV",
+      "netContents": "750 mL",
+      "applicantName": "Old Forester Distilling Co",
+      "city": "Louisville",
+      "state": "KY",
+      "imported": false,
+      "warningBoldSignal": "likely",
+      "warningBoldConfidence": 0.95,
+      "readabilityScore": 0.97
+    },
+    "ocr": [
+      {"text": "OLD FORESTER", "confidence": 0.98},
+      {"text": "BOURBON WHISKY", "confidence": 0.96},
+      {"text": "43% ALC/VOL", "confidence": 0.99},
+      {"text": "750 mL", "confidence": 0.97},
+      {"text": "Bottled by Old Forester Distilling Co. Louisville KY", "confidence": 0.95}
+    ],
+    "expectedVerdict": "FAIL"
+  },
+  {
+    "fixtureId": "warning_title_case",
+    "rulePackPath": "rules/spirits-v1.yaml",
+    "context": {
+      "brandName": "Old Forester",
+      "classType": "Bourbon Whisky",
+      "abv": "43% ABV",
+      "netContents": "750 mL",
+      "applicantName": "Old Forester Distilling Co",
+      "city": "Louisville",
+      "state": "KY",
+      "imported": false,
+      "warningBoldSignal": "likely",
+      "warningBoldConfidence": 0.95,
+      "readabilityScore": 0.97
+    },
+    "ocr": [
+      {"text": "OLD FORESTER", "confidence": 0.98},
+      {"text": "BOURBON WHISKY", "confidence": 0.96},
+      {"text": "43% ALC/VOL", "confidence": 0.99},
+      {"text": "750 mL", "confidence": 0.97},
+      {"text": "Bottled by Old Forester Distilling Co. Louisville KY", "confidence": 0.95},
+      {"text": "__GOVERNMENT_WARNING_TITLE_CASE__", "confidence": 0.99}
+    ],
+    "expectedVerdict": "FAIL"
+  },
+  {
+    "fixtureId": "warning_small_font_signal",
+    "rulePackPath": "rules/spirits-v1.yaml",
+    "context": {
+      "brandName": "Old Forester",
+      "classType": "Bourbon Whisky",
+      "abv": "43% ABV",
+      "netContents": "750 mL",
+      "applicantName": "Old Forester Distilling Co",
+      "city": "Louisville",
+      "state": "KY",
+      "imported": false,
+      "warningBoldSignal": "unlikely",
+      "warningBoldConfidence": 0.9,
+      "warningSizeSignal": "too_small",
+      "warningSizeRatio": 0.52,
+      "readabilityScore": 0.97
+    },
+    "ocr": [
+      {"text": "OLD FORESTER", "confidence": 0.98},
+      {"text": "BOURBON WHISKY", "confidence": 0.96},
+      {"text": "43% ALC/VOL", "confidence": 0.99},
+      {"text": "750 mL", "confidence": 0.97},
+      {"text": "Bottled by Old Forester Distilling Co. Louisville KY", "confidence": 0.95},
+      {"text": "__GOVERNMENT_WARNING__", "confidence": 0.97}
+    ],
+    "expectedVerdict": "NEEDS_REVIEW"
+  },
+  {
+    "fixtureId": "import_missing_origin",
+    "rulePackPath": "rules/spirits-v1.yaml",
+    "context": {
+      "brandName": "Highland Sample",
+      "classType": "Single Malt Whisky",
+      "abv": "46% ABV",
+      "netContents": "700 mL",
+      "applicantName": "Highland Sample Ltd",
+      "city": "Edinburgh",
+      "state": "UK",
+      "imported": true,
+      "countryOfOrigin": "Scotland",
+      "warningBoldSignal": "likely",
+      "warningBoldConfidence": 0.95,
+      "readabilityScore": 0.97
+    },
+    "ocr": [
+      {"text": "HIGHLAND SAMPLE", "confidence": 0.98},
+      {"text": "SINGLE MALT WHISKY", "confidence": 0.96},
+      {"text": "46% ALC/VOL", "confidence": 0.99},
+      {"text": "700 mL", "confidence": 0.97},
+      {"text": "Bottled by Highland Sample Ltd. Edinburgh UK", "confidence": 0.95},
+      {"text": "__GOVERNMENT_WARNING__", "confidence": 0.97}
+    ],
+    "expectedVerdict": "FAIL"
+  },
+  {
+    "fixtureId": "glare_low_confidence",
+    "rulePackPath": "rules/spirits-v1.yaml",
+    "context": {
+      "brandName": "Old Forester",
+      "classType": "Bourbon Whisky",
+      "abv": "43% ABV",
+      "netContents": "750 mL",
+      "applicantName": "Old Forester Distilling Co",
+      "city": "Louisville",
+      "state": "KY",
+      "imported": false,
+      "warningBoldSignal": "likely",
+      "warningBoldConfidence": 0.4,
+      "readabilityScore": 0.4
+    },
+    "ocr": [
+      {"text": "OLD FORESTER", "confidence": 0.4},
+      {"text": "BOURBON WHISKY", "confidence": 0.4},
+      {"text": "43% ALC/VOL", "confidence": 0.4},
+      {"text": "750 mL", "confidence": 0.4},
+      {"text": "Bottled by Old Forester Distilling Co. Louisville KY", "confidence": 0.4},
+      {"text": "__GOVERNMENT_WARNING__", "confidence": 0.4}
+    ],
+    "expectedVerdict": "UNREADABLE"
+  },
+  {
+    "fixtureId": "wine_basic",
+    "rulePackPath": "rules/wine-v1.yaml",
+    "context": {
+      "brandName": "Sunset Ridge",
+      "classType": "Rose Wine",
+      "abv": "13.5% ABV",
+      "netContents": "750 mL",
+      "applicantName": "Sunset Ridge Winery",
+      "city": "Napa",
+      "state": "CA",
+      "imported": false,
+      "warningBoldSignal": "likely",
+      "warningBoldConfidence": 0.95,
+      "readabilityScore": 0.97
+    },
+    "ocr": [
+      {"text": "SUNSET RIDGE", "confidence": 0.98},
+      {"text": "ROSE WINE", "confidence": 0.96},
+      {"text": "13.5% ALC/VOL", "confidence": 0.99},
+      {"text": "750 mL", "confidence": 0.97},
+      {"text": "Produced by Sunset Ridge Winery Napa CA", "confidence": 0.95},
+      {"text": "__GOVERNMENT_WARNING__", "confidence": 0.97}
+    ],
+    "expectedVerdict": "PASS"
+  },
+  {
+    "fixtureId": "malt_basic",
+    "rulePackPath": "rules/malt-v1.yaml",
+    "context": {
+      "brandName": "River City Lager",
+      "classType": "Malt Beverage",
+      "abv": "5% ABV",
+      "netContents": "355 mL",
+      "applicantName": "River City Brewing",
+      "city": "Portland",
+      "state": "OR",
+      "imported": false,
+      "warningBoldSignal": "likely",
+      "warningBoldConfidence": 0.95,
+      "readabilityScore": 0.97
+    },
+    "ocr": [
+      {"text": "RIVER CITY LAGER", "confidence": 0.98},
+      {"text": "MALT BEVERAGE", "confidence": 0.96},
+      {"text": "5% ALC/VOL", "confidence": 0.99},
+      {"text": "355 mL", "confidence": 0.97},
+      {"text": "Brewed by River City Brewing Portland OR", "confidence": 0.95},
+      {"text": "__GOVERNMENT_WARNING__", "confidence": 0.97}
+    ],
+    "expectedVerdict": "PASS"
+  }
+]
