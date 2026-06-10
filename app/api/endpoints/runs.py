@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 
 from app.core.fsm import RuntimeState
 from app.schemas.error import ErrorResponse, error_detail
+from app.services.adjudicator import advise_if_enabled
 from app.services.factory import get_vision_provider
 from app.services.receipts import public_key_payload, sign_run_receipt, verify_signed_receipt
 from app.services.rules import RuleEngine
@@ -308,6 +309,33 @@ async def _execute_skeleton_pipeline(run: dict[str, Any]) -> None:
         )
 
     verdict = RuntimeState(rule_result["verdict"])
+    if verdict == RuntimeState.NEEDS_REVIEW:
+        advice = await advise_if_enabled(run)
+        if advice["status"] != "disabled":
+            adjudicator_provider = advice.get("provider")
+            run["providers"]["adjudicator"] = adjudicator_provider
+            run["adjudication"] = advice
+            run["state"] = RuntimeState.ESCALATED
+            _append_event(
+                run,
+                "run.escalated",
+                {"runId": run["runId"], "reason": advice.get("status"), "provider": adjudicator_provider},
+            )
+            _append_event(
+                run,
+                "agent.spawned",
+                {"runId": run["runId"], "role": "vlm_adjudicator", "reason": advice.get("status")},
+            )
+            _append_event(
+                run,
+                "agent.opinion",
+                {
+                    "runId": run["runId"],
+                    "decision": advice.get("advisoryDecision", advice.get("decision")),
+                    "rationale": advice.get("rationale", advice.get("reason", "")),
+                },
+            )
+
     run["state"] = verdict
     run["verdict"] = verdict.value
     run["latencyMs"] = int((time.monotonic() - started) * 1000)
