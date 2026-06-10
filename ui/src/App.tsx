@@ -125,6 +125,16 @@ function formatUnknown(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function deriveImported(origin: string): boolean | undefined {
+  const normalized = origin.trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized.includes("import")) return true;
+  if (normalized.includes("domestic") || normalized.includes("united states") || normalized === "usa" || normalized === "us") {
+    return false;
+  }
+  return undefined;
+}
+
 function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -207,8 +217,15 @@ function App() {
     setRunState(null);
 
     const form = new FormData();
+    const originType = fields.origin.trim();
+    const imported = deriveImported(originType);
+    const applicationData = {
+      ...fields,
+      originType,
+      ...(imported === undefined ? {} : { imported, isImported: imported })
+    };
     form.append("image", file);
-    form.append("application_data", JSON.stringify(fields));
+    form.append("application_data", JSON.stringify(applicationData));
 
     try {
       const response = await fetch(`${API_BASE}/api/runs`, {
