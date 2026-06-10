@@ -13,6 +13,11 @@ class PreprocessConfig:
     target_long_edge: int = 1_600
     min_readability_score: float = 0.35
     pdf_page_cap: int = 2
+    deskew_max_degrees: float = 7.0
+    deskew_step_degrees: float = 0.5
+    deskew_min_abs_degrees: float = 0.75
+    deskew_min_confidence: float = 0.12
+    deskew_sample_long_edge: int = 700
 
 
 @dataclass(frozen=True)
@@ -55,6 +60,7 @@ def preprocess_image(
     _enforce_size_limits(image, cfg)
 
     image = _resize_for_ocr(image, cfg)
+    image, deskew_metrics = _deskew_for_ocr(image, cfg)
     score, metrics = _readability_metrics(image)
 
     image = ImageOps.autocontrast(image)
@@ -72,6 +78,7 @@ def preprocess_image(
             "targetLongEdge": cfg.target_long_edge,
         }
     )
+    metrics.update(deskew_metrics)
 
     output = io.BytesIO()
     image.save(output, format="PNG", optimize=True)
@@ -138,6 +145,143 @@ def _resize_for_ocr(image: Image.Image, config: PreprocessConfig) -> Image.Image
     scale = config.target_long_edge / float(long_edge)
     size = (max(1, round(image.width * scale)), max(1, round(image.height * scale)))
     return image.resize(size, Image.Resampling.LANCZOS)
+
+
+def _deskew_for_ocr(
+    image: Image.Image,
+    config: PreprocessConfig,
+) -> tuple[Image.Image, dict[str, Any]]:
+    angle, confidence, score = _estimate_deskew_angle(image, config)
+    metrics: dict[str, Any] = {
+        "deskewApplied": False,
+        "deskewAngleDegrees": round(angle, 3),
+        "deskewConfidence": round(confidence, 3),
+        "deskewScore": round(score, 3),
+        "deskewMaxDegrees": config.deskew_max_degrees,
+    }
+
+    if abs(angle) < config.deskew_min_abs_degrees:
+        return image, metrics
+    if confidence < config.deskew_min_confidence:
+        return image, metrics
+
+    deskewed = image.rotate(
+        angle,
+        resample=Image.Resampling.BICUBIC,
+        expand=True,
+        fillcolor=(255, 255, 255),
+    )
+    deskewed = _resize_for_ocr(deskewed, config)
+    metrics.update(
+        {
+            "deskewApplied": True,
+            "deskewWidth": deskewed.width,
+            "deskewHeight": deskewed.height,
+        }
+    )
+    return deskewed, metrics
+
+
+def _estimate_deskew_angle(
+    image: Image.Image,
+    config: PreprocessConfig,
+) -> tuple[float, float, float]:
+    if config.deskew_step_degrees <= 0 or config.deskew_max_degrees <= 0:
+        return 0.0, 0.0, 0.0
+
+    gray = ImageOps.autocontrast(ImageOps.grayscale(image))
+    long_edge = max(gray.size)
+    if long_edge > config.deskew_sample_long_edge:
+        scale = config.deskew_sample_long_edge / float(long_edge)
+        gray = gray.resize(
+            (max(1, round(gray.width * scale)), max(1, round(gray.height * scale))),
+            Image.Resampling.BILINEAR,
+        )
+
+    threshold = min(_otsu_threshold(gray), 220)
+    mask = gray.point(lambda value: 255 if value < threshold else 0, mode="L")
+    ink_fraction = mask.histogram()[255] / max(1, mask.width * mask.height)
+    if ink_fraction < 0.003 or ink_fraction > 0.35:
+        return 0.0, 0.0, 0.0
+
+    angle_count = (
+        int(round((config.deskew_max_degrees * 2.0) / config.deskew_step_degrees)) + 1
+    )
+    angles = [
+        round(-config.deskew_max_degrees + (index * config.deskew_step_degrees), 3)
+        for index in range(angle_count)
+    ]
+    scored = [
+        (
+            _horizontal_projection_score(
+                mask.rotate(
+                    angle,
+                    resample=Image.Resampling.NEAREST,
+                    expand=True,
+                    fillcolor=0,
+                )
+            ),
+            angle,
+        )
+        for angle in angles
+    ]
+    scored.sort(reverse=True)
+    best_score, best_angle = scored[0]
+    median_score = scored[len(scored) // 2][0]
+    confidence = _clamp((best_score - median_score) / max(best_score, 1.0))
+    return best_angle, confidence, best_score
+
+
+def _otsu_threshold(gray: Image.Image) -> int:
+    histogram = gray.histogram()
+    total = max(1, sum(histogram))
+    sum_total = sum(index * count for index, count in enumerate(histogram))
+    sum_background = 0.0
+    weight_background = 0
+    best_threshold = 128
+    best_variance = -1.0
+
+    for threshold, count in enumerate(histogram):
+        weight_background += count
+        if weight_background == 0:
+            continue
+        weight_foreground = total - weight_background
+        if weight_foreground == 0:
+            break
+
+        sum_background += threshold * count
+        mean_background = sum_background / weight_background
+        mean_foreground = (sum_total - sum_background) / weight_foreground
+        variance = (
+            weight_background
+            * weight_foreground
+            * (mean_background - mean_foreground) ** 2
+        )
+        if variance > best_variance:
+            best_variance = variance
+            best_threshold = threshold
+
+    return best_threshold
+
+
+def _horizontal_projection_score(mask: Image.Image) -> float:
+    bbox = mask.getbbox()
+    if bbox is None:
+        return 0.0
+    cropped = mask.crop(bbox)
+    width, height = cropped.size
+    if width <= 0 or height <= 0:
+        return 0.0
+
+    data = cropped.tobytes()
+    row_counts = [
+        sum(data[row * width : (row + 1) * width]) / 255.0 for row in range(height)
+    ]
+    mean = sum(row_counts) / max(1, len(row_counts))
+    if mean <= 0:
+        return 0.0
+    variance = sum((count - mean) ** 2 for count in row_counts) / len(row_counts)
+    return variance / max(mean, 1.0)
 
 
 def _readability_metrics(image: Image.Image) -> tuple[float, dict[str, Any]]:
