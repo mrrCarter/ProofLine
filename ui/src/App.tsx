@@ -76,9 +76,9 @@ type Sample = {
   name: string;
   trap: string;
   expected: TerminalVerdict;
-  variant: "pass" | "fail" | "review" | "unreadable";
+  variant: "pass" | "fail" | "review";
   fields: LabelFields;
-  labelLines: string[];
+  imagePath: string;
 };
 
 type BatchRow = {
@@ -130,20 +130,13 @@ const samples: Sample[] = [
     expected: "PASS",
     variant: "pass",
     fields: {
-      brandName: "MOCK",
-      classType: "Straight bourbon whiskey",
-      alcoholContent: "45% ABV",
+      brandName: "Old Forester",
+      classType: "Kentucky Straight Bourbon Whisky",
+      alcoholContent: "43% ABV",
       netContents: "750 mL",
       origin: "United States"
     },
-    labelLines: [
-      "MOCK",
-      "STRAIGHT BOURBON WHISKEY",
-      "45% ALC BY VOL",
-      "750 ML",
-      "GOVERNMENT WARNING: (1) ACCORDING TO THE SURGEON GENERAL, WOMEN SHOULD NOT DRINK ALCOHOLIC BEVERAGES DURING PREGNANCY.",
-      "UNITED STATES"
-    ]
+    imagePath: "/fixtures/pass_bourbon.png"
   },
   {
     id: "title-case-warning",
@@ -152,19 +145,13 @@ const samples: Sample[] = [
     expected: "FAIL",
     variant: "fail",
     fields: {
-      brandName: "RIDGE TEST",
-      classType: "Straight bourbon whiskey",
-      alcoholContent: "40% ABV",
+      brandName: "Old Forester",
+      classType: "Bourbon Whisky",
+      alcoholContent: "43% ABV",
       netContents: "750 mL",
       origin: "United States"
     },
-    labelLines: [
-      "RIDGE TEST",
-      "STRAIGHT BOURBON WHISKEY",
-      "40% ALC BY VOL",
-      "750 ML",
-      "Government Warning: according to the Surgeon General, women should not drink alcohol during pregnancy."
-    ]
+    imagePath: "/fixtures/warning_title_case.png"
   },
   {
     id: "proof-only",
@@ -173,34 +160,28 @@ const samples: Sample[] = [
     expected: "PASS",
     variant: "pass",
     fields: {
-      brandName: "NINETY LINE",
-      classType: "Kentucky straight bourbon whiskey",
+      brandName: "Stone's Throw",
+      classType: "Bourbon Whisky",
       alcoholContent: "45% ABV",
       netContents: "750 mL",
       origin: "United States"
     },
-    labelLines: [
-      "NINETY LINE",
-      "KENTUCKY STRAIGHT BOURBON WHISKEY",
-      "90 PROOF",
-      "750 ML",
-      "GOVERNMENT WARNING: (1) ACCORDING TO THE SURGEON GENERAL, WOMEN SHOULD NOT DRINK ALCOHOLIC BEVERAGES DURING PREGNANCY."
-    ]
+    imagePath: "/fixtures/proof_only_equivalent.png"
   },
   {
-    id: "glare",
-    name: "Glare photo",
-    trap: "Readability",
-    expected: "UNREADABLE",
-    variant: "unreadable",
+    id: "abv-mismatch",
+    name: "ABV mismatch",
+    trap: "Alcohol field",
+    expected: "FAIL",
+    variant: "fail",
     fields: {
-      brandName: "STONE'S THROW",
-      classType: "Distilled spirits specialty",
-      alcoholContent: "40% ABV",
-      netContents: "75 cL",
+      brandName: "Old Forester",
+      classType: "Bourbon Whisky",
+      alcoholContent: "45% ABV",
+      netContents: "750 mL",
       origin: "United States"
     },
-    labelLines: ["STONE'S THROW", "DISTILLED SPIRITS SPECIALTY", "40% ALC BY VOL", "75 CL"]
+    imagePath: "/fixtures/abv_mismatch.png"
   },
   {
     id: "import-origin",
@@ -209,19 +190,13 @@ const samples: Sample[] = [
     expected: "FAIL",
     variant: "fail",
     fields: {
-      brandName: "CASA NORTE",
-      classType: "Tequila",
-      alcoholContent: "40% ABV",
-      netContents: "750 mL",
+      brandName: "Highland Sample",
+      classType: "Single Malt Whisky",
+      alcoholContent: "46% ABV",
+      netContents: "700 mL",
       origin: "Imported"
     },
-    labelLines: [
-      "CASA NORTE",
-      "TEQUILA",
-      "40% ALC BY VOL",
-      "750 ML",
-      "GOVERNMENT WARNING: (1) ACCORDING TO THE SURGEON GENERAL, WOMEN SHOULD NOT DRINK ALCOHOLIC BEVERAGES DURING PREGNANCY."
-    ]
+    imagePath: "/fixtures/import_missing_origin.png"
   }
 ];
 
@@ -382,66 +357,10 @@ function normalizeBatchRows(payload: BatchResponse | Record<string, unknown>): B
 }
 
 async function labelImageFile(sample: Sample): Promise<File> {
-  const canvas = document.createElement("canvas");
-  canvas.width = 960;
-  canvas.height = 640;
-  const context = canvas.getContext("2d");
-  if (!context) return base64ToFile(PNG_1X1_BASE64, `${sample.id}-label.png`);
-
-  context.fillStyle = sample.variant === "unreadable" ? "#eef1f2" : "#ffffff";
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.strokeStyle = "#11181d";
-  context.lineWidth = 8;
-  context.strokeRect(26, 26, canvas.width - 52, canvas.height - 52);
-
-  context.fillStyle = "#11181d";
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-
-  const [brand, ...rest] = sample.labelLines;
-  context.font = "800 64px Arial";
-  context.fillText(brand, canvas.width / 2, 108, 820);
-
-  context.font = "700 34px Arial";
-  rest.slice(0, 4).forEach((line, index) => {
-    context.fillText(line, canvas.width / 2, 194 + index * 58, 820);
-  });
-
-  context.font = "600 22px Arial";
-  const warning = rest.slice(4).join(" ");
-  if (warning) {
-    const chunks = warning.match(/.{1,72}(\s|$)/g) ?? [warning];
-    chunks.slice(0, 4).forEach((line, index) => {
-      context.fillText(line.trim(), canvas.width / 2, 470 + index * 34, 820);
-    });
-  }
-
-  if (sample.variant === "unreadable") {
-    const glare = context.createLinearGradient(180, 80, 820, 560);
-    glare.addColorStop(0, "rgba(255,255,255,0.08)");
-    glare.addColorStop(0.45, "rgba(255,255,255,0.92)");
-    glare.addColorStop(1, "rgba(255,255,255,0.16)");
-    context.fillStyle = glare;
-    context.beginPath();
-    context.moveTo(180, 0);
-    context.lineTo(960, 410);
-    context.lineTo(790, 640);
-    context.lineTo(0, 230);
-    context.closePath();
-    context.fill();
-    context.fillStyle = "rgba(24,32,38,0.18)";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-  }
-
-  return new Promise((resolve) => {
-    canvas.toBlob((blob) => {
-      if (!blob) {
-        resolve(base64ToFile(PNG_1X1_BASE64, `${sample.id}-label.png`));
-        return;
-      }
-      resolve(new File([blob], `${sample.id}-label.png`, { type: "image/png" }));
-    }, "image/png");
-  });
+  const response = await fetch(sample.imagePath);
+  if (!response.ok) return base64ToFile(PNG_1X1_BASE64, `${sample.id}-label.png`);
+  const blob = await response.blob();
+  return new File([blob], `${sample.id}.png`, { type: blob.type || "image/png" });
 }
 
 function App() {
@@ -960,7 +879,7 @@ function App() {
                     disabled={preparingSampleId === sample.id}
                   >
                     <span className="sample-preview" aria-hidden="true">
-                      <span>{sample.fields.brandName}</span>
+                      <img src={sample.imagePath} alt="" loading="lazy" decoding="async" />
                     </span>
                     <span className="sample-name">{sample.name}</span>
                     <span className="sample-meta">{sample.trap}</span>

@@ -312,15 +312,19 @@ input:focus-visible,
   display: grid;
   place-items: center;
   min-width: 0;
+  border: 1px solid #dfe6eb;
   border-radius: 6px;
-  color: #11181d;
-  font-size: 0.76rem;
-  font-weight: 800;
-  text-align: center;
+  background: #f5f8fa;
   overflow: hidden;
 }
 
-.sample-preview span,
+.sample-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
 .sample-name,
 .sample-meta {
   max-width: 100%;
@@ -353,19 +357,15 @@ input:focus-visible,
 }
 
 .sample-tile.pass .sample-preview {
-  background: #dff4e7;
+  border-color: #99d3ae;
 }
 
 .sample-tile.fail .sample-preview {
-  background: #ffe3df;
+  border-color: #f0aaa1;
 }
 
 .sample-tile.review .sample-preview {
-  background: #fff2c6;
-}
-
-.sample-tile.unreadable .sample-preview {
-  background: #e7ecf0;
+  border-color: #e7c663;
 }
 
 .field-grid {
