@@ -13,14 +13,14 @@ Canonical task board. No checkbox flips without evidence. ORCH-01 owns this file
 ## Phase 1 — Walking skeleton (target: end of hour 3) — RELEASED #59235 (2026-06-10 07:54Z)
 A vertical slice that lies about nothing: upload → mock OCR → one real rule → verdict card → SSE timeline, deployed locally via compose.
 Lock map (#59235): api-01 → main.py + app/ (narrow to app/api/ + app/core/ post-scaffold) · vision-01 → app/vision/ · rules-01 → app/rules/ + rules/ + tests/ · ui-01 → ui/ · infra-01 → Dockerfile, compose.yaml, .github/ · verify-01 → no write locks.
-## Phase 1 — Walking skeleton (target: end of hour 3)
+## Phase 1 — Walking skeleton — ✅ CLOSED 2026-06-10 ~09:01Z (gate GREEN @abd5401, reproducible from origin)
 - [x] API-01: FastAPI app, /healthz, POST /api/runs with validation + error schema, FSM enum, SSE endpoint with real events
 - [x] VISION-01: provider interface + mock fixture provider (deterministic text+boxes+confidence)
 - [x] RULES-01: finding schema, BRAND_NAME_MATCH end-to-end, rule pack loader (spirits-v1.yaml skeleton)
 - [x] UI-01: single-screen shell, drop zone, fields form with sample autofill, verdict banner, timeline rendering SSE
 - [x] INFRA-01: Dockerfile + compose, GitHub Actions skeleton (lint/type/test/build)
 - [x] VERIFY-01: review the slice for seam quality (adapter boundaries, schemas) before anyone builds on it
-- Evidence: local URL http://localhost:8000 · smoke output healthz green · SSE stream PASS/FAIL verified
+- Evidence (gate GREEN @abd5401, reproducible from origin; VERIFY-01 isolated-archive gate): API 072b111/6a51f56 (+fix 47c257d) · VISION mock-OCR ce935b5/a1c716a · RULES engine e61980c · UI shell 9789f50/19a2247/08758bb · INFRA Dockerfile+compose fe3d05e · Omar Gate (ProofLine-adapted, P2) b9da466. GATE: ruff All-pass · mypy clean (20 files, NoReturn verified) · pytest 23/23 (0.59s) · UI npm+tsc+vite clean (193ms, 203KB/64KB gz) · live e2e 55ms (spirits-v1@1.0.0, 8 findings, 1 rule.evaluated SSE/finding, ABV↔proof PASS, eCFR warning exact PASS, format-signal honest NEEDS_REVIEW) · Ed25519 receipts crypto-verified live · VERIFY M1+M2 closed. Formal close by ORCH-01 (orch-01-opus-4.8).
 
 ## Phase 2 — Real engine (target: end of day 1)
 - [ ] VISION-01: preprocess chain (EXIF, deskew, contrast, readability score); PaddleOCR + Tesseract benched on fixtures; decision + numbers posted to room and LESSONS
