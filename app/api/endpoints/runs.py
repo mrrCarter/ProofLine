@@ -42,6 +42,24 @@ EVENT_STREAM_MAX_BACKOFF_SECONDS = 0.25
 runs: dict[str, dict[str, Any]] = {}
 receipts: dict[str, dict[str, Any]] = {}
 result_cache: dict[tuple[str, str, str], dict[str, Any]] = {}
+RESERVED_RULE_CONTEXT_KEYS = {
+    "_pipelineComputed",
+    "pipelineComputed",
+    "pipelineContext",
+    "testOnlyComputedFormatSignal",
+    "test_only_computed_format_signal",
+}
+TEST_OVERRIDE_KEY_PREFIXES = ("test_override_", "testOverride")
+
+
+def _sanitize_rule_context(application_data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in application_data.items()
+        if isinstance(key, str)
+        and key not in RESERVED_RULE_CONTEXT_KEYS
+        and not key.startswith(TEST_OVERRIDE_KEY_PREFIXES)
+    }
 
 
 def _request_id(request: Request, form_request_id: Optional[str]) -> str:
@@ -311,9 +329,7 @@ async def _execute_skeleton_pipeline(run: dict[str, Any]) -> None:
 
     rules_started = time.monotonic()
     brand = _application_brand(run["applicationData"])
-    rule_context = dict(run["applicationData"])
-    for reserved_key in ("_pipelineComputed", "pipelineComputed", "pipelineContext"):
-        rule_context.pop(reserved_key, None)
+    rule_context = _sanitize_rule_context(run["applicationData"])
     pipeline_context = ocr.metadata.get("pipelineContext")
     if isinstance(pipeline_context, dict):
         rule_context["pipelineContext"] = pipeline_context

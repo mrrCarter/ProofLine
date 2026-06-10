@@ -1,3 +1,4 @@
+import os
 import re
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -21,6 +22,7 @@ WARNING_FORMAT_SOURCE_URL = (
     "https://www.ecfr.gov/current/title-27/chapter-I/subchapter-A/part-16/"
     "subpart-C/section-16.22"
 )
+TEST_ONLY_OVERRIDE_ENVS = {"dev", "development", "local", "test"}
 
 
 def normalize_label_text(text: str) -> str:
@@ -81,6 +83,8 @@ def _mapping_value(value: Any, keys: tuple[str, ...]) -> Any:
 
 
 def _test_only_enabled(value: Any) -> bool:
+    if os.getenv("PROOFLINE_ENV", "").strip().casefold() not in TEST_ONLY_OVERRIDE_ENVS:
+        return False
     return value is True or (isinstance(value, str) and value.strip().casefold() in {"1", "true", "yes"})
 
 

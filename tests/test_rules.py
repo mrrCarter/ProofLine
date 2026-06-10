@@ -1,3 +1,4 @@
+from app.api.endpoints.runs import _sanitize_rule_context
 from app.core.constants import GOVERNMENT_WARNING_TEXT
 from app.schemas.finding import FindingStatus
 from app.services.rules import RuleEngine
@@ -252,6 +253,46 @@ def test_warning_format_computed_likely_passes():
     assert finding.status == FindingStatus.PASS
     assert finding.observed["signalSource"] == "pipeline_computed"
     assert finding.observed["passWithCaveat"] is False
+
+
+def test_warning_format_test_override_requires_test_env(monkeypatch):
+    engine = RuleEngine()
+    context = {
+        "testOnlyComputedFormatSignal": True,
+        "test_override_warningBoldSignal": "unlikely",
+        "test_override_warningBoldConfidence": 0.92,
+    }
+
+    monkeypatch.setenv("PROOFLINE_ENV", "production")
+    production_findings = engine.evaluate(_ocr(GOVERNMENT_WARNING_TEXT, confidence=0.95), context)
+    production_finding = _finding(production_findings, "GOVERNMENT_WARNING_FORMAT_SIGNAL")
+
+    assert production_finding.status == FindingStatus.PASS
+    assert production_finding.observed["signalSource"] == "not_computed"
+    assert production_finding.observed["passWithCaveat"] is True
+
+    monkeypatch.setenv("PROOFLINE_ENV", "test")
+    test_findings = engine.evaluate(_ocr(GOVERNMENT_WARNING_TEXT, confidence=0.95), context)
+    test_finding = _finding(test_findings, "GOVERNMENT_WARNING_FORMAT_SIGNAL")
+
+    assert test_finding.status == FindingStatus.NEEDS_REVIEW
+    assert test_finding.observed["signalSource"] == "test_override"
+
+
+def test_rule_context_sanitizer_strips_user_computed_and_test_override_keys():
+    context = _sanitize_rule_context(
+        {
+            "brandName": "Old Forester",
+            "_pipelineComputed": {"warningFormat": {"boldSignal": "likely"}},
+            "pipelineComputed": {"warningFormat": {"boldSignal": "likely"}},
+            "pipelineContext": {"warningFormat": {"boldSignal": "likely"}},
+            "testOnlyComputedFormatSignal": True,
+            "test_override_warningBoldSignal": "likely",
+            "testOverrideWarningBoldConfidence": 0.99,
+        }
+    )
+
+    assert context == {"brandName": "Old Forester"}
 
 
 def test_warning_format_indeterminate_passes_with_caveat_on_text_caps_and_confidence():
