@@ -157,7 +157,8 @@ def _readability_metrics(image: Image.Image) -> tuple[float, dict[str, Any]]:
     contrast_score = _clamp(stddev / 64.0)
     edge_score = _clamp(edge_mean / 24.0)
     exposure_score = _clamp(1.0 - (abs(mean - 128.0) / 128.0))
-    glare_penalty = min(0.30, glare_fraction * 1.5)
+    document_like_white = contrast_score >= 0.55 and edge_score >= 0.20 and dark_fraction >= 0.015
+    glare_penalty = 0.0 if document_like_white else min(0.30, glare_fraction * 1.5)
     dark_penalty = min(0.20, dark_fraction)
 
     score = _clamp(
@@ -177,6 +178,8 @@ def _readability_metrics(image: Image.Image) -> tuple[float, dict[str, Any]]:
         "contrastScore": round(contrast_score, 3),
         "edgeScore": round(edge_score, 3),
         "exposureScore": round(exposure_score, 3),
+        "documentLikeWhite": document_like_white,
+        "glarePenalty": round(glare_penalty, 3),
         "readabilityScore": round(score, 3),
     }
 
