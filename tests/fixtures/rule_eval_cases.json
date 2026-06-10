@@ -11,8 +11,6 @@
       "city": "Louisville",
       "state": "KY",
       "imported": false,
-      "warningBoldSignal": "likely",
-      "warningBoldConfidence": 0.96,
       "readabilityScore": 0.97
     },
     "ocr": [
@@ -37,8 +35,6 @@
       "city": "Frankfort",
       "state": "KY",
       "imported": false,
-      "warningBoldSignal": "likely",
-      "warningBoldConfidence": 0.94,
       "readabilityScore": 0.96
     },
     "ocr": [
@@ -63,8 +59,6 @@
       "city": "Frankfort",
       "state": "KY",
       "imported": false,
-      "warningBoldSignal": "likely",
-      "warningBoldConfidence": 0.95,
       "readabilityScore": 0.97
     },
     "ocr": [
@@ -89,8 +83,6 @@
       "city": "Louisville",
       "state": "KY",
       "imported": false,
-      "warningBoldSignal": "likely",
-      "warningBoldConfidence": 0.95,
       "readabilityScore": 0.97
     },
     "ocr": [
@@ -115,8 +107,6 @@
       "city": "Frankfort",
       "state": "KY",
       "imported": false,
-      "warningBoldSignal": "likely",
-      "warningBoldConfidence": 0.95,
       "readabilityScore": 0.97
     },
     "ocr": [
@@ -141,8 +131,6 @@
       "city": "Louisville",
       "state": "KY",
       "imported": false,
-      "warningBoldSignal": "likely",
-      "warningBoldConfidence": 0.95,
       "readabilityScore": 0.97
     },
     "ocr": [
@@ -167,8 +155,6 @@
       "city": "Louisville",
       "state": "KY",
       "imported": false,
-      "warningBoldSignal": "likely",
-      "warningBoldConfidence": 0.95,
       "readabilityScore": 0.97
     },
     "ocr": [
@@ -192,8 +178,6 @@
       "city": "Louisville",
       "state": "KY",
       "imported": false,
-      "warningBoldSignal": "likely",
-      "warningBoldConfidence": 0.95,
       "readabilityScore": 0.97
     },
     "ocr": [
@@ -218,11 +202,12 @@
       "city": "Louisville",
       "state": "KY",
       "imported": false,
-      "warningBoldSignal": "unlikely",
-      "warningBoldConfidence": 0.9,
-      "warningSizeSignal": "too_small",
-      "warningSizeRatio": 0.52,
-      "readabilityScore": 0.97
+      "readabilityScore": 0.97,
+      "testOnlyComputedFormatSignal": true,
+      "test_override_warningBoldSignal": "unlikely",
+      "test_override_warningBoldConfidence": 0.9,
+      "test_override_warningSizeSignal": "too_small",
+      "test_override_warningSizeRatio": 0.52
     },
     "ocr": [
       {"text": "OLD FORESTER", "confidence": 0.98},
@@ -247,8 +232,6 @@
       "state": "UK",
       "imported": true,
       "countryOfOrigin": "Scotland",
-      "warningBoldSignal": "likely",
-      "warningBoldConfidence": 0.95,
       "readabilityScore": 0.97
     },
     "ocr": [
@@ -273,8 +256,6 @@
       "city": "Louisville",
       "state": "KY",
       "imported": false,
-      "warningBoldSignal": "likely",
-      "warningBoldConfidence": 0.4,
       "readabilityScore": 0.4
     },
     "ocr": [
@@ -299,8 +280,6 @@
       "city": "Napa",
       "state": "CA",
       "imported": false,
-      "warningBoldSignal": "likely",
-      "warningBoldConfidence": 0.95,
       "readabilityScore": 0.97
     },
     "ocr": [
@@ -325,8 +304,6 @@
       "city": "Portland",
       "state": "OR",
       "imported": false,
-      "warningBoldSignal": "likely",
-      "warningBoldConfidence": 0.95,
       "readabilityScore": 0.97
     },
     "ocr": [

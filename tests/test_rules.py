@@ -7,6 +7,13 @@ def _ocr(text: str, confidence: float = 0.98):
     return [{"text": text, "confidence": confidence, "bbox": [[0, 0], [100, 0], [100, 20], [0, 20]]}]
 
 
+def _ocr_many(items):
+    return [
+        {"text": text, "confidence": confidence, "bbox": [[0, 0], [100, 0], [100, 20], [0, 20]]}
+        for text, confidence in items
+    ]
+
+
 def _finding(findings, rule_id):
     return next(finding for finding in findings if finding.ruleId == rule_id)
 
@@ -178,16 +185,93 @@ def test_low_readability_routes_unreadable():
     assert engine.aggregate_verdict(findings) == "UNREADABLE"
 
 
-def test_warning_format_unlikely_needs_review_not_fail():
+def test_low_global_readability_with_required_anchors_routes_review_not_unreadable():
+    engine = RuleEngine()
+    findings = engine.evaluate(
+        _ocr_many(
+            [
+                (GOVERNMENT_WARNING_TEXT, 0.96),
+                ("Bottled by Old Forester Distilling Co. Louisville KY", 0.95),
+            ]
+        ),
+        {
+            "applicantName": "Old Forester Distilling Co",
+            "city": "Louisville",
+            "state": "KY",
+            "readabilityScore": 0.4,
+        },
+    )
+    finding = _finding(findings, "IMAGE_READABILITY")
+
+    assert finding.status == FindingStatus.NEEDS_REVIEW
+    assert finding.observed["requiredAnchorsVisible"] is True
+    assert engine.aggregate_verdict(findings) == "NEEDS_REVIEW"
+
+
+def test_warning_format_ignores_legacy_caller_supplied_signal():
     engine = RuleEngine()
     findings = engine.evaluate(
         _ocr(GOVERNMENT_WARNING_TEXT),
-        {"warningBoldSignal": "unlikely", "warningBoldConfidence": 0.8},
+        {
+            "warningBoldSignal": "unlikely",
+            "warningBoldConfidence": 0.8,
+            "computedWarningBoldSignal": "unlikely",
+            "computedWarningBoldConfidence": 0.8,
+            "warningFormat": {"boldSignal": "unlikely", "boldConfidence": 0.8},
+        },
+    )
+    finding = _finding(findings, "GOVERNMENT_WARNING_FORMAT_SIGNAL")
+
+    assert finding.status == FindingStatus.PASS
+    assert finding.observed["boldSignal"] == "indeterminate"
+    assert finding.observed["legacyCallerSignalIgnored"] is True
+    assert finding.observed["passWithCaveat"] is True
+
+
+def test_warning_format_computed_unlikely_needs_review_not_fail():
+    engine = RuleEngine()
+    findings = engine.evaluate(
+        _ocr(GOVERNMENT_WARNING_TEXT),
+        {"_pipelineComputed": {"warningFormat": {"boldSignal": "unlikely", "boldConfidence": 0.8}}},
     )
     finding = _finding(findings, "GOVERNMENT_WARNING_FORMAT_SIGNAL")
 
     assert finding.status == FindingStatus.NEEDS_REVIEW
+    assert finding.observed["signalSource"] == "pipeline_computed"
     assert engine.aggregate_verdict(findings) == "NEEDS_REVIEW"
+
+
+def test_warning_format_computed_likely_passes():
+    engine = RuleEngine()
+    findings = engine.evaluate(
+        _ocr(GOVERNMENT_WARNING_TEXT),
+        {"pipelineComputed": {"warningFormat": {"boldSignal": "likely", "boldConfidence": 0.91}}},
+    )
+    finding = _finding(findings, "GOVERNMENT_WARNING_FORMAT_SIGNAL")
+
+    assert finding.status == FindingStatus.PASS
+    assert finding.observed["signalSource"] == "pipeline_computed"
+    assert finding.observed["passWithCaveat"] is False
+
+
+def test_warning_format_indeterminate_passes_with_caveat_on_text_caps_and_confidence():
+    engine = RuleEngine()
+    findings = engine.evaluate(_ocr(GOVERNMENT_WARNING_TEXT, confidence=0.95), {})
+    finding = _finding(findings, "GOVERNMENT_WARNING_FORMAT_SIGNAL")
+
+    assert finding.status == FindingStatus.PASS
+    assert finding.observed["boldSignal"] == "indeterminate"
+    assert finding.observed["passWithCaveat"] is True
+    assert "passes with caveat" in finding.explanation
+
+
+def test_warning_format_indeterminate_needs_review_when_confidence_low():
+    engine = RuleEngine()
+    findings = engine.evaluate(_ocr(GOVERNMENT_WARNING_TEXT, confidence=0.82), {})
+    finding = _finding(findings, "GOVERNMENT_WARNING_FORMAT_SIGNAL")
+
+    assert finding.status == FindingStatus.NEEDS_REVIEW
+    assert finding.observed["passWithCaveat"] is False
 
 
 def test_wine_and_malt_rule_packs_load():
