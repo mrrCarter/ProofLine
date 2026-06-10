@@ -12,8 +12,6 @@ import pytest
 
 from app.api.endpoints import runs as run_endpoint
 from app.core.fsm import RuntimeState
-from app.services.local_vision import LocalVisionProvider
-from app.services.preprocess import PreprocessConfig
 
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
@@ -101,11 +99,6 @@ def test_full_pipeline_image_fixture_set_has_spec_10_cases():
 def test_full_pipeline_tesseract_latency_p95_under_budget(monkeypatch: pytest.MonkeyPatch):
     _require_tesseract()
     monkeypatch.setenv("VISION_PROVIDER", "local")
-    monkeypatch.setattr(
-        run_endpoint,
-        "get_vision_provider",
-        lambda: LocalVisionProvider(PreprocessConfig(min_readability_score=0.0)),
-    )
     run_endpoint.runs.clear()
     run_endpoint.receipts.clear()
     run_endpoint.result_cache.clear()
