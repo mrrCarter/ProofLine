@@ -12,13 +12,22 @@ from nacl.signing import SigningKey, VerifyKey
 RECEIPT_VERSION = "1"
 SIGNATURE_PREFIX = "ed25519:"
 SIGNING_KEY_ENV = "PROOFLINE_ED25519_SEED_B64"
+LEGACY_SIGNING_KEY_ENV = "PROOFLINE_ED25519_PRIVATE_KEY_B64"
 PUBLIC_KEY_ID_ENV = "PROOFLINE_PUBLIC_KEY_ID"
 PUBLIC_KEY_REGISTRY_ENV = "PROOFLINE_RECEIPT_PUBLIC_KEYS_JSON"
-PRODUCTION_ENVS = {"prod", "production"}
+ALLOW_EPHEMERAL_RECEIPTS_ENV = "PROOFLINE_ALLOW_EPHEMERAL_RECEIPTS"
+DEV_ENVS = {"dev", "development", "local", "test"}
+TRUE_VALUES = {"1", "true", "yes", "on"}
+DEV_PUBLIC_KEY_ID = "proofline-dev-ephemeral"
 
 
-def _production_mode() -> bool:
-    return os.getenv("PROOFLINE_ENV", "").strip().casefold() in PRODUCTION_ENVS
+def _dev_mode() -> bool:
+    return os.getenv("PROOFLINE_ENV", "").strip().casefold() in DEV_ENVS
+
+
+def _ephemeral_receipts_allowed() -> bool:
+    explicit_allow = os.getenv(ALLOW_EPHEMERAL_RECEIPTS_ENV, "").strip().casefold() in TRUE_VALUES
+    return explicit_allow and _dev_mode()
 
 
 def _decode_b64(value: str, env_name: str) -> bytes:
@@ -29,11 +38,14 @@ def _decode_b64(value: str, env_name: str) -> bytes:
 
 
 def _load_signing_key() -> SigningKey:
-    encoded = os.getenv(SIGNING_KEY_ENV) or os.getenv("PROOFLINE_ED25519_PRIVATE_KEY_B64")
+    encoded = os.getenv(SIGNING_KEY_ENV) or os.getenv(LEGACY_SIGNING_KEY_ENV)
     if not encoded:
-        if _production_mode():
-            raise RuntimeError(f"{SIGNING_KEY_ENV} is required when PROOFLINE_ENV=production")
-        return SigningKey.generate()
+        if _ephemeral_receipts_allowed():
+            return SigningKey.generate()
+        raise RuntimeError(
+            f"{SIGNING_KEY_ENV} is required unless PROOFLINE_ENV is one of "
+            f"{', '.join(sorted(DEV_ENVS))} and {ALLOW_EPHEMERAL_RECEIPTS_ENV}=true"
+        )
 
     key_bytes = _decode_b64(encoded, SIGNING_KEY_ENV)
     if len(key_bytes) not in {32, 64}:
@@ -41,9 +53,19 @@ def _load_signing_key() -> SigningKey:
     return SigningKey(key_bytes[:32])
 
 
+def _load_public_key_id() -> str:
+    key_id = os.getenv(PUBLIC_KEY_ID_ENV, "").strip()
+    if key_id:
+        return key_id
+    configured_signing_key = os.getenv(SIGNING_KEY_ENV) or os.getenv(LEGACY_SIGNING_KEY_ENV)
+    if not configured_signing_key and _ephemeral_receipts_allowed():
+        return DEV_PUBLIC_KEY_ID
+    raise RuntimeError(f"{PUBLIC_KEY_ID_ENV} is required when using a stable receipt signing seed")
+
+
 _SIGNING_KEY = _load_signing_key()
 _VERIFY_KEY = _SIGNING_KEY.verify_key
-_PUBLIC_KEY_ID = os.getenv(PUBLIC_KEY_ID_ENV, "proofline-dev-ephemeral")
+_PUBLIC_KEY_ID = _load_public_key_id()
 
 
 def _decode_public_key(encoded: str, source: str) -> VerifyKey:

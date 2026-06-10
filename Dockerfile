@@ -1,4 +1,5 @@
 # Stage 1: Build the UI
+# Digest pins keep the prototype reproducible; refresh them through reviewed PRs when rebuilding for CVEs.
 FROM node:20-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0 AS ui-builder
 WORKDIR /ui
 COPY ui/package*.json ./

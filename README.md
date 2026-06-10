@@ -88,21 +88,30 @@ docker compose up --build
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `VISION_PROVIDER` | `mock` | OCR provider: `mock` (deterministic fixtures) or `local` (real Tesseract). Compose sets `mock` for a hermetic demo. |
+| `VISION_PROVIDER` | `mock` | OCR provider: `mock` (deterministic fixtures) or `local` (real Tesseract). Compose sets `mock` for a hermetic dev demo; a submitted temp URL should use `local`. |
 | `UI_STATIC_DIR` | `/app/static` (compose) / `static` (code) | Directory the built SPA is served from. |
 | `BUILD_SHA` | `dev` | Surfaced in `/healthz`. |
 | `PROOFLINE_BATCH_WORKERS` | `2` (clamped 1–4) | OCR worker count for the batch `ProcessPoolExecutor`. |
-| `PROOFLINE_ED25519_SEED_B64` | _(unset → ephemeral dev key)_ | Base64 32-byte seed (or 64-byte private key) for receipt signing. **Required when `PROOFLINE_ENV=production`**; otherwise a per-process key is generated and `keyId` is `proofline-dev-ephemeral`. |
-| `PROOFLINE_PUBLIC_KEY_ID` | `proofline-dev-ephemeral` | The `publicKeyId` stamped into receipts and returned by `/api/receipts/pubkey`. |
+| `PROOFLINE_ED25519_SEED_B64` | _(unset)_ | Base64 32-byte seed (or 64-byte private key) for receipt signing. Required unless explicitly running development/test/local mode with ephemeral receipts allowed. |
+| `PROOFLINE_PUBLIC_KEY_ID` | `proofline-dev-ephemeral` only for explicit dev ephemeral mode | The `publicKeyId` stamped into receipts and returned by `/api/receipts/pubkey`; required for stable-key demos and non-dev environments. |
 | `PROOFLINE_RECEIPT_PUBLIC_KEYS_JSON` | _(unset)_ | Optional `{keyId: base64PublicKey}` registry so the verify endpoint can validate receipts signed by rotated/older keys. |
-| `PROOFLINE_ENV` | _(unset)_ | `production` / `prod` makes a configured signing seed mandatory (fail-closed). |
+| `PROOFLINE_ENV` | `development` in compose / unset otherwise | `dev`, `development`, `local`, and `test` are the only environments that can allow ephemeral receipt keys; unset/prod/staging fail closed without a configured seed. |
+| `PROOFLINE_ALLOW_EPHEMERAL_RECEIPTS` | `true` in compose / unset otherwise | Must be `true` together with a dev/test/local `PROOFLINE_ENV` to permit a per-process receipt key. Never set this for submitted demos or production. |
 | `PROOFLINE_ADJUDICATOR_ENABLED` | _(falsey → OFF)_ | Enables the VLM advisory adapter. Off by default (law 2). |
 | `PROOFLINE_ADJUDICATOR_ENDPOINT` | _(unset)_ | Advisory adapter URL; without it, escalation is reported `unconfigured` and stays NEEDS_REVIEW. |
 | `PROOFLINE_ADJUDICATOR_TIMEOUT_SECONDS` | `10` | Hard timeout on the advisory call. |
 | `PROOFLINE_ADJUDICATOR_CIRCUIT_FAILURES` | `3` | Failures before the circuit opens. |
 | `PROOFLINE_ADJUDICATOR_CIRCUIT_COOLDOWN_SECONDS` | `60` | Circuit-open cooldown. |
 
-To run with real OCR instead of the deterministic mock, set `VISION_PROVIDER=local` (the container already has the `tesseract-ocr` binary).
+To run with real OCR instead of the deterministic mock, set `VISION_PROVIDER=local` (the container already has the `tesseract-ocr` binary). For any submitted temp URL or restart-safe demo, also set a stable receipt key:
+
+```bash
+export PROOFLINE_ENV=production
+export PROOFLINE_PUBLIC_KEY_ID=proofline-demo-2026-06
+export PROOFLINE_ED25519_SEED_B64="$(python3 -c 'import base64, os; print(base64.b64encode(os.urandom(32)).decode())')"
+```
+
+Generate the seed once, keep it secret for the demo window, and publish `/api/receipts/pubkey`; receipts signed before a restart remain verifiable as long as the same seed and key id are reused.
 
 ### Run the tests
 
@@ -232,7 +241,7 @@ msg = json.dumps(unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=F
 VerifyKey(pub).verify(msg, base64.b64decode(receipt["signature"].removeprefix("ed25519:")))  # raises if invalid
 ```
 
-In production, set `PROOFLINE_ED25519_SEED_B64` and `PROOFLINE_PUBLIC_KEY_ID` to a stable key, and use `PROOFLINE_RECEIPT_PUBLIC_KEYS_JSON` to keep verifying receipts signed by rotated keys. The point of law 4: **any verdict can be independently re-verified, years later, against a published key.**
+In production, staging, deployed demos, or any other non-dev mode, ProofLine fails closed unless `PROOFLINE_ED25519_SEED_B64` and `PROOFLINE_PUBLIC_KEY_ID` are set. Ephemeral receipt keys are allowed only when `PROOFLINE_ENV` is `dev`, `development`, `local`, or `test` **and** `PROOFLINE_ALLOW_EPHEMERAL_RECEIPTS=true`; those receipts are correctly labeled `proofline-dev-ephemeral` and are not restart-stable. Use `PROOFLINE_RECEIPT_PUBLIC_KEYS_JSON` to keep verifying receipts signed by rotated keys. The point of law 4: **any verdict can be independently re-verified, years later, against a published key.**
 
 ---
 
@@ -285,7 +294,8 @@ These are deliberate and documented. Fake completeness loses to honest limits wi
 - **No measured full-pipeline p95 is claimed as a hard number.** Only the rule-engine stage (2.79 ms p95) plus the CI-enforced ≤ 4500 ms budget — because the full-pipeline test skips where Tesseract is absent (see Latency proof).
 - **Bold and type-size from a photo are honest signals, never silent passes.** A photograph cannot prove font weight or millimetre type size. `boldSignal` is `likely | unlikely | indeterminate`; 16.22 size is a relative ratio; uncertainty routes to NEEDS_REVIEW with the crop, never a hard FAIL on formatting alone.
 - **The VLM adjudicator is advisory and off by default.** It is wired *only* after a deterministic NEEDS_REVIEW, is env-gated OFF, has a 10 s timeout and a circuit breaker, and can only annotate toward NEEDS_REVIEW — it can never flip a deterministic PASS/FAIL. The happy path never waits on it.
-- **The default demo runs `VISION_PROVIDER=mock`** for deterministic, hermetic behavior; `local` exercises real Tesseract. Both honor law 2 (zero required outbound).
+- **The local compose demo runs `VISION_PROVIDER=mock` and explicitly dev-only ephemeral receipts** for deterministic, hermetic behavior; submitted demos should run `VISION_PROVIDER=local` with `PROOFLINE_ENV=production`, a stable receipt seed, and a stable `PROOFLINE_PUBLIC_KEY_ID`. Both OCR modes honor law 2 (zero required outbound), but only the stable-key path gives restart-stable receipt verification.
+- **Container base-image digests and apt OCR package versions are pinned for reproducibility.** For this take-home prototype, CVE/base refresh happens as a reviewed PR when rebuilding the image; an automated refresh bot is intentionally out of scope.
 - **No live deployed URL.** AWS deploy is parked pending credentials; the scaling path is written, not deployed. Everything in this README is reproducible from origin with `docker compose up` and `pytest`.
 
 ---

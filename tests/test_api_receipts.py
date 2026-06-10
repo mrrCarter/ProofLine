@@ -124,13 +124,41 @@ def test_receipt_download_and_verify_round_trip():
     assert rejected.json()["valid"] is False
 
 
-def test_production_requires_configured_signing_seed(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("PROOFLINE_ENV", "production")
+def test_non_dev_requires_configured_signing_seed(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("PROOFLINE_ENV", raising=False)
+    monkeypatch.delenv(receipt_service.ALLOW_EPHEMERAL_RECEIPTS_ENV, raising=False)
     monkeypatch.delenv(receipt_service.SIGNING_KEY_ENV, raising=False)
-    monkeypatch.delenv("PROOFLINE_ED25519_PRIVATE_KEY_B64", raising=False)
+    monkeypatch.delenv(receipt_service.LEGACY_SIGNING_KEY_ENV, raising=False)
 
     with pytest.raises(RuntimeError, match=receipt_service.SIGNING_KEY_ENV):
         receipt_service._load_signing_key()
+
+
+def test_dev_ephemeral_receipts_require_explicit_allow(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("PROOFLINE_ENV", "development")
+    monkeypatch.delenv(receipt_service.ALLOW_EPHEMERAL_RECEIPTS_ENV, raising=False)
+    monkeypatch.delenv(receipt_service.SIGNING_KEY_ENV, raising=False)
+    monkeypatch.delenv(receipt_service.LEGACY_SIGNING_KEY_ENV, raising=False)
+
+    with pytest.raises(RuntimeError, match=receipt_service.ALLOW_EPHEMERAL_RECEIPTS_ENV):
+        receipt_service._load_signing_key()
+
+    monkeypatch.setenv(receipt_service.ALLOW_EPHEMERAL_RECEIPTS_ENV, "true")
+    assert isinstance(receipt_service._load_signing_key(), SigningKey)
+
+
+def test_configured_seed_requires_public_key_id(monkeypatch: pytest.MonkeyPatch):
+    seed = base64.b64encode(bytes(range(32))).decode("ascii")
+    monkeypatch.setenv(receipt_service.SIGNING_KEY_ENV, seed)
+    monkeypatch.setenv("PROOFLINE_ENV", "development")
+    monkeypatch.setenv(receipt_service.ALLOW_EPHEMERAL_RECEIPTS_ENV, "true")
+    monkeypatch.delenv(receipt_service.PUBLIC_KEY_ID_ENV, raising=False)
+
+    with pytest.raises(RuntimeError, match=receipt_service.PUBLIC_KEY_ID_ENV):
+        receipt_service._load_public_key_id()
+
+    monkeypatch.setenv(receipt_service.PUBLIC_KEY_ID_ENV, "proofline-prod-2026-06")
+    assert receipt_service._load_public_key_id() == "proofline-prod-2026-06"
 
 
 def test_verify_uses_public_key_id_registry(monkeypatch: pytest.MonkeyPatch):

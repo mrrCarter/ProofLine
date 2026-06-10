@@ -5,6 +5,9 @@ services:
       - "8000:8000"
     environment:
       - VISION_PROVIDER=mock
+      - PROOFLINE_ENV=development
+      - PROOFLINE_ALLOW_EPHEMERAL_RECEIPTS=true
+      - PROOFLINE_PUBLIC_KEY_ID=proofline-dev-ephemeral
       - UI_STATIC_DIR=/app/static
     volumes:
       - ./artifacts:/app/artifacts
