@@ -123,6 +123,10 @@ def _safe_advisory_decision(raw: Any) -> str:
     return decision
 
 
+def _safe_error_code(exc: BaseException) -> str:
+    return type(exc).__name__[:80]
+
+
 async def advise_if_enabled(run: dict[str, Any]) -> dict[str, Any]:
     if not adjudicator_enabled():
         return {"status": "disabled", "provider": None, "decision": None}
@@ -165,7 +169,8 @@ async def advise_if_enabled(run: dict[str, Any]) -> dict[str, Any]:
             "status": "error",
             "provider": PROVIDER_NAME,
             "decision": "NEEDS_REVIEW",
-            "reason": str(exc),
+            "reason": "adapter_call_failed",
+            "errorCode": _safe_error_code(exc),
         }
 
     _record_success()

@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 from app.services import adjudicator
 
@@ -45,3 +46,22 @@ def test_adjudicator_circuit_opens_after_failures(monkeypatch):
     assert failed["status"] == "error"
     assert opened["status"] == "circuit_open"
     assert opened["decision"] == "NEEDS_REVIEW"
+
+
+def test_adjudicator_error_payload_does_not_leak_endpoint(monkeypatch):
+    adjudicator.reset_circuit()
+    endpoint = "http://secret.internal.example/adjudicate"
+    monkeypatch.setenv(adjudicator.ENABLED_ENV, "true")
+    monkeypatch.setenv(adjudicator.ENDPOINT_ENV, endpoint)
+    monkeypatch.setattr(
+        adjudicator,
+        "_post_json",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError(f"failed to reach {endpoint}")),
+    )
+
+    result = asyncio.run(adjudicator.advise_if_enabled({"runId": "run-sanitized"}))
+
+    assert result["status"] == "error"
+    assert result["reason"] == "adapter_call_failed"
+    assert result["errorCode"] == "OSError"
+    assert endpoint not in json.dumps(result)
