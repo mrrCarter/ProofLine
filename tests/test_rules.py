@@ -127,6 +127,15 @@ def test_import_missing_origin_fails():
     assert finding.observed["countryPresent"] is False
 
 
+def test_ui_origin_imported_alias_reaches_country_rule():
+    engine = RuleEngine()
+    findings = engine.evaluate(_ocr("Product of Scotland"), {"origin": "Imported", "countryOfOrigin": "Scotland"})
+    finding = _finding(findings, "COUNTRY_OF_ORIGIN_IF_IMPORT")
+
+    assert finding.status == FindingStatus.PASS
+    assert finding.expected["imported"] is True
+
+
 def test_name_address_present_passes():
     engine = RuleEngine()
     findings = engine.evaluate(
@@ -149,6 +158,15 @@ def test_name_address_missing_fails():
 
     assert finding.status == FindingStatus.FAIL
     assert finding.observed["missing"] == ["name", "city", "state"]
+
+
+def test_name_address_missing_application_data_needs_review():
+    engine = RuleEngine()
+    findings = engine.evaluate(_ocr("Bottled by Old Forester Distilling Co. Louisville KY"), {})
+    finding = _finding(findings, "NAME_ADDRESS_PRESENT")
+
+    assert finding.status == FindingStatus.NEEDS_REVIEW
+    assert finding.expected["reason"] == "mandatory-rule-context-missing"
 
 
 def test_low_readability_routes_unreadable():

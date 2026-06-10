@@ -418,11 +418,27 @@ class RuleEngine:
         )
         city = self._context_text(context, ("city", "producerCity", "bottlerCity"))
         state = self._context_text(context, ("state", "producerState", "bottlerState"))
-        if not any((name, city, state)):
-            return None
-
         rule = self.rules_by_id["NAME_ADDRESS_PRESENT"]
         label_text = self.normalize(self._all_ocr_text(ocr_results))
+        if not any((name, city, state)):
+            return Finding(
+                ruleId="NAME_ADDRESS_PRESENT",
+                severity=FindingSeverity(rule.get("severity", "HIGH")),
+                status=FindingStatus.NEEDS_REVIEW,
+                expected={
+                    "requiredApplicationFields": ["applicantName", "city", "state"],
+                    "reason": "mandatory-rule-context-missing",
+                },
+                observed={"normalizedLabelText": label_text[:500]},
+                confidence=_confidence_from_items(ocr_results),
+                evidence=Evidence(
+                    text=self._all_ocr_text(ocr_results)[:500],
+                    provider=context.get("ocr_provider") or context.get("provider"),
+                ),
+                explanation="Name/address rule could not be deterministically evaluated because application data is missing.",
+                remediation="Provide producer/bottler name and city/state application fields.",
+            )
+
         missing = []
         if name and self.normalize(name) not in label_text:
             missing.append("name")
@@ -456,7 +472,7 @@ class RuleEngine:
         ocr_results: list[dict[str, Any]],
         context: dict[str, Any],
     ) -> Optional[Finding]:
-        imported = _as_bool(_context_value(context, ("imported", "isImported", "originType")))
+        imported = _as_bool(_context_value(context, ("imported", "isImported", "originType", "origin")))
         if imported is None:
             return None
         rule = self.rules_by_id["COUNTRY_OF_ORIGIN_IF_IMPORT"]
