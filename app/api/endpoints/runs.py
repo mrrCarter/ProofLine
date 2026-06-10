@@ -38,7 +38,7 @@ TERMINAL_STATES = {
 # In-memory storage is deliberately scoped to the prototype slice.
 runs: dict[str, dict[str, Any]] = {}
 receipts: dict[str, dict[str, Any]] = {}
-result_cache: dict[tuple[str, str], dict[str, Any]] = {}
+result_cache: dict[tuple[str, str, str], dict[str, Any]] = {}
 
 
 def _request_id(request: Request, form_request_id: Optional[str]) -> str:
@@ -178,8 +178,26 @@ def _store_receipt(run: dict[str, Any]) -> dict[str, Any]:
     return receipt
 
 
-def _cache_key(run: dict[str, Any]) -> tuple[str, str]:
-    return (run["artifactSha256"], run["rulePack"])
+def _application_data_hash(application_data: dict[str, Any]) -> str:
+    canonical = json.dumps(
+        application_data,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _cache_key_for(
+    artifact_hash: str,
+    rule_pack: str,
+    application_data: dict[str, Any],
+) -> tuple[str, str, str]:
+    return (artifact_hash, rule_pack, _application_data_hash(application_data))
+
+
+def _cache_key(run: dict[str, Any]) -> tuple[str, str, str]:
+    return _cache_key_for(run["artifactSha256"], run["rulePack"], run["applicationData"])
 
 
 def _cache_result(run: dict[str, Any]) -> None:
@@ -423,7 +441,7 @@ async def create_run(
         "startedAtMonotonic": time.monotonic(),
     }
     _append_event(runs[run_id], "run.created", {"runId": run_id, "artifactSha256": artifact_hash})
-    cached = result_cache.get((artifact_hash, rule_pack_ref))
+    cached = result_cache.get(_cache_key_for(artifact_hash, rule_pack_ref, parsed_application_data))
     if cached:
         _complete_cached_run(runs[run_id], cached)
         return {

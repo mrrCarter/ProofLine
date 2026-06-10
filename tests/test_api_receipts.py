@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from nacl.signing import SigningKey
 
+from app.api.endpoints import runs as run_endpoint
 from app.services import receipts as receipt_service
 from main import app
 
@@ -18,21 +19,30 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
-def _post_bourbon(client: TestClient) -> dict:
+def setup_function() -> None:
+    run_endpoint.runs.clear()
+    run_endpoint.receipts.clear()
+    run_endpoint.result_cache.clear()
+
+
+def _bourbon_application_data(overrides: dict | None = None) -> dict:
+    application_data = {
+        "brandName": "Old Forester",
+        "classType": "Kentucky Straight Bourbon Whisky",
+        "abv": "43% ABV",
+        "imported": False,
+    }
+    if overrides:
+        application_data.update(overrides)
+    return application_data
+
+
+def _post_bourbon(client: TestClient, overrides: dict | None = None) -> dict:
     image = Path("app/services/fixtures/pass_bourbon.png").read_bytes()
     response = client.post(
         "/api/runs",
         files={"image": ("pass_bourbon.png", image, "image/png")},
-        data={
-            "application_data": json.dumps(
-                {
-                    "brandName": "Old Forester",
-                    "classType": "Kentucky Straight Bourbon Whisky",
-                    "abv": "43% ABV",
-                    "imported": False,
-                }
-            )
-        },
+        data={"application_data": json.dumps(_bourbon_application_data(overrides))},
     )
     assert response.status_code == 200
     return response.json()
@@ -161,6 +171,26 @@ def test_artifact_rulepack_cache_returns_signed_receipt_for_new_run():
     second_receipt = client.get(second_run["receiptRef"]).json()
     assert second_receipt["runId"] == second_run["runId"]
     assert client.post("/api/receipts/verify", json=second_receipt).json()["valid"] is True
+
+
+def test_result_cache_key_includes_normalized_application_data():
+    client = _client()
+    first = _post_bourbon(client)
+    first_run = _terminal_run(client, first["runId"])
+
+    second = _post_bourbon(client, {"brandName": "Other Whiskey"})
+    assert second["cacheHit"] is False
+    second_run = _terminal_run(client, second["runId"])
+
+    assert second_run["runId"] != first_run["runId"]
+    assert second_run["artifactSha256"] == first_run["artifactSha256"]
+    assert second_run["rulePack"] == first_run["rulePack"]
+
+    first_findings = {finding["ruleId"]: finding for finding in first_run["findings"]}
+    second_findings = {finding["ruleId"]: finding for finding in second_run["findings"]}
+    assert first_findings["BRAND_NAME_MATCH"]["status"] == "PASS"
+    assert second_findings["BRAND_NAME_MATCH"]["status"] == "FAIL"
+    assert second_run["findings"] != first_run["findings"]
 
 
 def test_ui_origin_field_is_normalized_for_country_rule():
