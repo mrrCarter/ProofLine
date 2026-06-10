@@ -13,9 +13,9 @@ def get_vision_provider() -> VisionProvider:
     if provider_type == "mock":
         return MockVisionProvider()
 
-    # Placeholder for real provider (PaddleOCR/Tesseract)
-    # elif provider_type == "local":
-    #     from .local_vision import LocalVisionProvider
-    #     return LocalVisionProvider()
+    if provider_type == "local":
+        from .local_vision import LocalVisionProvider
+
+        return LocalVisionProvider()
 
     return MockVisionProvider()
