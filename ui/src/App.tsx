@@ -14,6 +14,7 @@ import {
   XCircle
 } from "lucide-react";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { findingSentence, formatFindingValue, ruleLabel } from "./findingText";
 
 type Verdict = "PASS" | "FAIL" | "NEEDS_REVIEW" | "UNREADABLE" | "ERROR" | null;
 type TerminalVerdict = Exclude<Verdict, null>;
@@ -99,6 +100,11 @@ type BatchResponse = {
   labels?: unknown[];
   items?: unknown[];
   summary?: Record<string, unknown>;
+};
+
+type EvidencePreview = {
+  src: string;
+  label: string;
 };
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
@@ -250,12 +256,6 @@ function base64ToFile(base64: string, filename: string): File {
   return new File([bytes], filename, { type: "image/png" });
 }
 
-function formatUnknown(value: unknown): string {
-  if (value === null || value === undefined || value === "") return "None";
-  if (typeof value === "string") return value;
-  return JSON.stringify(value);
-}
-
 function deriveImported(origin: string): boolean | undefined {
   const normalized = origin.trim().toLowerCase();
   if (!normalized) return undefined;
@@ -282,6 +282,24 @@ function classForStatus(status: BatchStatus | Verdict): string {
   if (status === "NEEDS_REVIEW") return "review";
   if (status === "UNREADABLE") return "unreadable";
   return "pending";
+}
+
+function labelForStatus(status: string): string {
+  return status === "NEEDS_REVIEW" ? "NEEDS REVIEW" : status;
+}
+
+const batchTriageOrder: Record<string, number> = {
+  FAIL: 0,
+  NEEDS_REVIEW: 1,
+  ERROR: 2,
+  UNREADABLE: 3,
+  RUNNING: 4,
+  QUEUED: 5,
+  PASS: 6
+};
+
+function batchTriageRank(row: BatchRow): number {
+  return batchTriageOrder[row.verdict ?? row.status] ?? 99;
 }
 
 function stringifyError(caught: unknown, fallback: string): string {
@@ -491,6 +509,7 @@ function App() {
   const [isRunning, setIsRunning] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [evidencePreview, setEvidencePreview] = useState<EvidencePreview | null>(null);
   const [preparingSampleId, setPreparingSampleId] = useState<string | null>(null);
   const [batchRows, setBatchRows] = useState<BatchRow[]>([]);
   const [batchTimeline, setBatchTimeline] = useState<TimelineEvent[]>([]);
@@ -527,21 +546,27 @@ function App() {
   }, [filePreviewUrl]);
 
   useEffect(() => {
-    if (!isPreviewOpen) return;
+    if (!isPreviewOpen && !evidencePreview) return;
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setIsPreviewOpen(false);
+      if (event.key === "Escape") {
+        setIsPreviewOpen(false);
+        setEvidencePreview(null);
+      }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isPreviewOpen]);
+  }, [evidencePreview, isPreviewOpen]);
 
   useEffect(() => {
     if (!filePreviewUrl && isPreviewOpen) setIsPreviewOpen(false);
   }, [filePreviewUrl, isPreviewOpen]);
 
   const filteredBatchRows = useMemo(() => {
-    if (batchFilter === "ALL") return batchRows;
-    return batchRows.filter((row) => row.verdict === batchFilter || row.status === batchFilter);
+    const visibleRows = batchFilter === "ALL" ? batchRows : batchRows.filter((row) => row.verdict === batchFilter || row.status === batchFilter);
+    return visibleRows
+      .map((row, index) => ({ row, index }))
+      .sort((left, right) => batchTriageRank(left.row) - batchTriageRank(right.row) || left.index - right.index)
+      .map(({ row }) => row);
   }, [batchFilter, batchRows]);
 
   const batchCounts = useMemo(() => {
@@ -576,6 +601,7 @@ function App() {
     setRunState(null);
     setError(null);
     setIsPreviewOpen(false);
+    setEvidencePreview(null);
     try {
       setFile(await labelImageFile(sample));
     } finally {
@@ -590,6 +616,7 @@ function App() {
     setRunState(null);
     setError(null);
     setIsPreviewOpen(false);
+    setEvidencePreview(null);
   }
 
   function onBatchFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -612,6 +639,7 @@ function App() {
       setRunState(null);
       setError(null);
       setIsPreviewOpen(false);
+      setEvidencePreview(null);
     }
   }
 
@@ -658,6 +686,7 @@ function App() {
     setError(null);
     setTimeline([]);
     setRunState(null);
+    setEvidencePreview(null);
 
     const form = new FormData();
     form.append("image", file);
@@ -950,6 +979,7 @@ function App() {
                   ref={fileInputRef}
                   type="file"
                   accept="image/png,image/jpeg,image/webp,image/heic,image/heif,application/pdf"
+                  capture="environment"
                   onChange={onFileChange}
                 />
                 <span className="drop-icon">
@@ -1049,29 +1079,54 @@ function App() {
               </div>
               {runState?.findings.length ? (
                 <div className="finding-list">
-                  {runState.findings.map((finding) => (
-                    <article className={`finding-item ${finding.status.toLowerCase()}`} key={finding.ruleId}>
-                      <div>
-                        <h3>{finding.ruleId.replaceAll("_", " ")}</h3>
-                        <p>{finding.explanation}</p>
-                      </div>
-                      <dl>
-                        <div>
-                          <dt>Expected</dt>
-                          <dd>{formatUnknown(finding.expected)}</dd>
+                  {runState.findings.map((finding) => {
+                    const label = ruleLabel(finding.ruleId);
+                    const cropUri = finding.evidence?.cropUri ?? null;
+                    return (
+                      <article className={`finding-item ${finding.status.toLowerCase()}`} key={finding.ruleId}>
+                        <div className="finding-summary">
+                          <div>
+                            <h3>{label}</h3>
+                            <p>{findingSentence(finding)}</p>
+                          </div>
+                          <span className={`status-pill ${classForStatus(finding.status as TerminalVerdict)}`}>{labelForStatus(finding.status)}</span>
                         </div>
-                        <div>
-                          <dt>Observed</dt>
-                          <dd>{formatUnknown(finding.observed)}</dd>
-                        </div>
-                        <div>
-                          <dt>Confidence</dt>
-                          <dd>{finding.confidence != null ? `${Math.round(finding.confidence * 100)}%` : "None"}</dd>
-                        </div>
-                      </dl>
-                      {finding.evidence?.text ? <p className="evidence-text">{finding.evidence.text}</p> : null}
-                    </article>
-                  ))}
+                        {finding.remediation && finding.status !== "PASS" ? <p className="remediation-note">{finding.remediation}</p> : null}
+                        {cropUri ? (
+                          <button
+                            className="evidence-crop-button"
+                            type="button"
+                            onClick={() => setEvidencePreview({ src: cropUri, label: `${label} evidence crop` })}
+                          >
+                            <img src={cropUri} alt="" />
+                            <span>
+                              <Maximize2 size={15} aria-hidden="true" />
+                              Zoom evidence crop
+                            </span>
+                          </button>
+                        ) : null}
+                        <details className="finding-details">
+                          <summary>Technical details</summary>
+                          <dl className="finding-metrics">
+                            <div>
+                              <dt>Expected</dt>
+                              <dd>{formatFindingValue(finding.expected)}</dd>
+                            </div>
+                            <div>
+                              <dt>Observed</dt>
+                              <dd>{formatFindingValue(finding.observed)}</dd>
+                            </div>
+                            <div>
+                              <dt>Confidence</dt>
+                              <dd>{finding.confidence != null ? `${Math.round(finding.confidence * 100)}%` : "None"}</dd>
+                            </div>
+                          </dl>
+                          {finding.evidence?.text ? <p className="evidence-text">{finding.evidence.text}</p> : null}
+                          <pre className="finding-raw">{JSON.stringify(finding, null, 2)}</pre>
+                        </details>
+                      </article>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="empty-panel">
@@ -1220,6 +1275,20 @@ function App() {
               </button>
             </div>
             <img src={filePreviewUrl} alt={`Uploaded label preview for ${file?.name ?? "selected label"}`} />
+          </div>
+        </div>
+      ) : null}
+
+      {evidencePreview ? (
+        <div className="preview-dialog-backdrop" role="presentation" onClick={() => setEvidencePreview(null)}>
+          <div className="preview-dialog" role="dialog" aria-modal="true" aria-label={evidencePreview.label} onClick={(event) => event.stopPropagation()}>
+            <div className="preview-dialog-bar">
+              <strong>{evidencePreview.label}</strong>
+              <button className="mini-icon-button" type="button" aria-label="Close evidence preview" onClick={() => setEvidencePreview(null)}>
+                <X size={18} aria-hidden="true" />
+              </button>
+            </div>
+            <img src={evidencePreview.src} alt={evidencePreview.label} />
           </div>
         </div>
       ) : null}

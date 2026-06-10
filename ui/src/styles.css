@@ -49,6 +49,10 @@ button:disabled {
   padding: 8px 0 20px;
 }
 
+.topbar > div {
+  min-width: 0;
+}
+
 .topbar-actions {
   display: flex;
   align-items: center;
@@ -293,6 +297,7 @@ h1 {
 .verify-button:focus-visible,
 .secondary-button:focus-visible,
 .preview-thumb:focus-visible,
+.evidence-crop-button:focus-visible,
 .icon-button:focus-visible,
 .mini-icon-button:focus-visible,
 .mode-tabs button:focus-visible,
@@ -577,10 +582,76 @@ select {
 
 .finding-item h3 {
   font-size: 1rem;
+  overflow-wrap: anywhere;
 }
 
 .finding-item p {
   color: #44535c;
+}
+
+.finding-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.finding-summary > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.finding-summary .status-pill {
+  flex: 0 0 auto;
+}
+
+.remediation-note {
+  border-left: 3px solid #d5a400;
+  padding-left: 10px;
+  font-weight: 720;
+}
+
+.evidence-crop-button {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  border: 1px solid #c9d5dc;
+  border-radius: 8px;
+  background: #f8fbfc;
+  padding: 8px;
+  color: #173b51;
+  text-align: left;
+  font-weight: 800;
+}
+
+.evidence-crop-button img {
+  width: 76px;
+  aspect-ratio: 1;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #eef3f6;
+}
+
+.evidence-crop-button span {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.finding-details {
+  display: grid;
+  gap: 10px;
+}
+
+.finding-details summary {
+  cursor: pointer;
+  color: #27343c;
+  font-weight: 850;
 }
 
 dl {
@@ -607,6 +678,21 @@ dd {
   background: #f3f6f8;
   padding: 10px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.finding-raw {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  border-radius: 6px;
+  background: #11181d;
+  color: #f8fbfc;
+  padding: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.82rem;
 }
 
 .empty-panel {
@@ -821,6 +907,7 @@ progress {
 
   .topbar-actions {
     justify-items: stretch;
+    width: 100%;
   }
 
   h1 {
@@ -880,5 +967,105 @@ progress {
 
   .summary-pills {
     justify-content: flex-start;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-shell {
+    width: min(100% - 16px, 100%);
+    padding: 10px 0 28px;
+  }
+
+  .topbar {
+    gap: 12px;
+    padding-bottom: 14px;
+  }
+
+  h1 {
+    font-size: 1.35rem;
+  }
+
+  .mode-tabs,
+  .run-chip {
+    width: 100%;
+  }
+
+  .run-chip {
+    justify-content: center;
+    min-width: 0;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .upload-band,
+  .fields-band,
+  .findings-panel,
+  .timeline-panel,
+  .batch-table-panel {
+    padding: 12px;
+  }
+
+  .drop-zone {
+    min-height: 196px;
+  }
+
+  .drop-icon {
+    width: 52px;
+    height: 52px;
+  }
+
+  .drop-title {
+    font-size: 1.12rem;
+  }
+
+  .sample-tile {
+    grid-template-columns: 72px minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    align-items: center;
+    min-height: 96px;
+  }
+
+  .sample-preview {
+    grid-row: 1 / span 3;
+    min-height: 72px;
+  }
+
+  .sample-verdict {
+    justify-self: start;
+  }
+
+  .verdict-banner,
+  .error-banner {
+    align-items: flex-start;
+  }
+
+  .verdict-banner strong,
+  .batch-summary strong {
+    font-size: 1.5rem;
+    overflow-wrap: anywhere;
+  }
+
+  .finding-summary {
+    display: grid;
+  }
+
+  .finding-summary .status-pill {
+    justify-self: start;
+  }
+
+  .evidence-crop-button {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .evidence-crop-button img {
+    width: 64px;
+  }
+
+  .preview-dialog-backdrop {
+    padding: 8px;
+  }
+
+  .batch-table {
+    min-width: 620px;
   }
 }
