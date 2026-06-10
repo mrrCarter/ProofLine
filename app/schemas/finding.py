@@ -1,12 +1,15 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
 from enum import Enum
+from typing import Any, Optional
+
+from pydantic import BaseModel, Field
+
 
 class FindingStatus(str, Enum):
     PASS = "PASS"
     FAIL = "FAIL"
     NEEDS_REVIEW = "NEEDS_REVIEW"
     UNREADABLE = "UNREADABLE"
+
 
 class FindingSeverity(str, Enum):
     INFO = "INFO"
@@ -15,11 +18,13 @@ class FindingSeverity(str, Enum):
     HIGH = "HIGH"
     CRITICAL = "CRITICAL"
 
+
 class Evidence(BaseModel):
     text: Optional[str] = None
-    bbox: Optional[List[float]] = None
+    bbox: Optional[list[list[float]]] = None
     cropUri: Optional[str] = None
     provider: Optional[str] = None
+
 
 class Finding(BaseModel):
     ruleId: str

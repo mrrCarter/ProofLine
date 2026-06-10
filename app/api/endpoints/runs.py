@@ -6,24 +6,17 @@ import time
 import uuid
 from typing import Any, Optional
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from app.core.fsm import RuntimeState
 from app.schemas.error import ErrorResponse, error_detail
+from app.schemas.finding import Evidence, Finding, FindingSeverity, FindingStatus
 from app.services.factory import get_vision_provider
 
 router = APIRouter()
 
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024
-SUPPORTED_CONTENT_TYPES = {
-    "image/jpeg",
-    "image/png",
-    "image/webp",
-    "image/heic",
-    "image/heif",
-    "application/pdf",
-}
 TERMINAL_STATES = {
     RuntimeState.PASS,
     RuntimeState.FAIL,
@@ -62,7 +55,7 @@ def _detect_upload_type(content: bytes) -> Optional[str]:
         return "image/webp"
     if content.startswith(b"%PDF"):
         return "application/pdf"
-    heic_brands = {b"heic", b"heix", b"hevc", b"hevx", b"mif1"}
+    heic_brands = {b"heic", b"heif", b"heix", b"hevc", b"hevx", b"mif1"}
     if len(content) > 12 and content[4:8] == b"ftyp" and content[8:12] in heic_brands:
         return "image/heic"
     return None
@@ -111,61 +104,112 @@ def _sse(event: str, data: dict[str, Any]) -> str:
 
 def _model_dump(value: Any) -> dict[str, Any]:
     if hasattr(value, "model_dump"):
-        return value.model_dump()
+        try:
+            return value.model_dump(mode="json")
+        except TypeError:
+            return value.model_dump()
     return value.dict()
 
 
-async def _run_skeleton_pipeline(run: dict[str, Any]) -> None:
-    if run["state"] in TERMINAL_STATES:
+def _finding_payload(finding: Finding) -> dict[str, Any]:
+    return _model_dump(finding)
+
+
+def _terminal_state(run: dict[str, Any]) -> bool:
+    return run["state"] in TERMINAL_STATES
+
+
+async def _run_skeleton_pipeline(run_id: str) -> None:
+    run = runs.get(run_id)
+    if run is None or _terminal_state(run):
         return
 
+    try:
+        await _execute_skeleton_pipeline(run)
+    except Exception as exc:
+        started = run["startedAtMonotonic"]
+        run["state"] = RuntimeState.ERROR
+        run["verdict"] = RuntimeState.ERROR.value
+        run["latencyMs"] = int((time.monotonic() - started) * 1000)
+        run["timings"]["totalMs"] = run["latencyMs"]
+        _append_event(
+            run,
+            "run.completed",
+            {
+                "runId": run["runId"],
+                "status": RuntimeState.ERROR.value,
+                "verdict": RuntimeState.ERROR.value,
+                "latencyMs": run["latencyMs"],
+                "receiptId": None,
+                "error": {
+                    "code": "PIPELINE_ERROR",
+                    "message": str(exc),
+                },
+            },
+        )
+
+
+async def _execute_skeleton_pipeline(run: dict[str, Any]) -> None:
     started = run["startedAtMonotonic"]
+
+    preprocess_started = time.monotonic()
     await asyncio.sleep(0.05)
     run["state"] = RuntimeState.PREPROCESSED
-    _append_event(run, "preprocess.completed", {"runId": run["runId"], "latencyMs": 50})
+    run["timings"]["preprocessMs"] = int((time.monotonic() - preprocess_started) * 1000)
+    _append_event(
+        run,
+        "preprocess.completed",
+        {"runId": run["runId"], "latencyMs": run["timings"]["preprocessMs"]},
+    )
 
+    ocr_started = time.monotonic()
     provider = get_vision_provider()
     ocr = await provider.process_image(run["imageBytes"], artifact_hash=run["artifactSha256"])
+    run["timings"]["ocrMs"] = int((time.monotonic() - ocr_started) * 1000)
     run["state"] = RuntimeState.EXTRACTED
     run["ocr"] = _model_dump(ocr)
+    provider_name = ocr.metadata.get("provider", "mock")
     _append_event(
         run,
         "ocr.completed",
         {
             "runId": run["runId"],
-            "provider": ocr.metadata.get("provider", "mock"),
+            "provider": provider_name,
             "confidence": round(max((item.confidence for item in ocr.results), default=0.0), 3),
-            "latencyMs": 25,
+            "latencyMs": run["timings"]["ocrMs"],
         },
     )
 
+    rules_started = time.monotonic()
     brand = _application_brand(run["applicationData"])
     all_text = " ".join(item.text for item in ocr.results)
     normalized_brand = _normalize_text(brand or "")
     normalized_label = _normalize_text(all_text)
     brand_pass = bool(normalized_brand and normalized_brand in normalized_label)
-    finding = {
-        "ruleId": "BRAND_NAME_MATCH",
-        "severity": "HIGH",
-        "status": "PASS" if brand_pass else "FAIL",
-        "expected": {"raw": brand, "normalized": normalized_brand},
-        "observed": {"raw": all_text, "normalized": normalized_label},
-        "confidence": 0.95 if brand_pass else 0.8,
-        "evidence": {
-            "text": all_text,
-            "bbox": ocr.results[0].bbox.vertices if ocr.results else None,
-            "provider": "mock",
-        },
-        "explanation": (
+    finding = Finding(
+        ruleId="BRAND_NAME_MATCH",
+        severity=FindingSeverity.HIGH,
+        status=FindingStatus.PASS if brand_pass else FindingStatus.FAIL,
+        expected={"raw": brand, "normalized": normalized_brand},
+        observed={"raw": all_text, "normalized": normalized_label},
+        confidence=0.95 if brand_pass else 0.8,
+        evidence=Evidence(
+            text=all_text,
+            bbox=ocr.results[0].bbox.vertices if ocr.results else None,
+            provider=provider_name,
+        ),
+        explanation=(
             "Application brand was found in mock OCR text."
             if brand_pass
             else "Application brand was not found in mock OCR text."
         ),
-        "remediation": None if brand_pass else "Confirm the application brand matches the label.",
-    }
+        remediation=None if brand_pass else "Confirm the application brand matches the label.",
+    )
+    finding_payload = _finding_payload(finding)
 
-    run["findings"] = [finding]
+    run["findings"] = [finding_payload]
     run["state"] = RuntimeState.RULED
+    run["timings"]["rulesMs"] = int((time.monotonic() - rules_started) * 1000)
     _append_event(
         run,
         "field.extracted",
@@ -174,13 +218,19 @@ async def _run_skeleton_pipeline(run: dict[str, Any]) -> None:
     _append_event(
         run,
         "rule.evaluated",
-        {"runId": run["runId"], "ruleId": "BRAND_NAME_MATCH", "status": finding["status"]},
+        {
+            "runId": run["runId"],
+            "ruleId": "BRAND_NAME_MATCH",
+            "status": finding_payload["status"],
+            "latencyMs": run["timings"]["rulesMs"],
+        },
     )
 
     verdict = RuntimeState.PASS if brand_pass else RuntimeState.FAIL
     run["state"] = verdict
     run["verdict"] = verdict.value
     run["latencyMs"] = int((time.monotonic() - started) * 1000)
+    run["timings"]["totalMs"] = run["latencyMs"]
     _append_event(
         run,
         "run.completed",
@@ -203,6 +253,7 @@ def _public_run(run: dict[str, Any]) -> dict[str, Any]:
         "verdict": run.get("verdict"),
         "findings": run.get("findings", []),
         "latencyMs": run.get("latencyMs"),
+        "timings": run.get("timings", {}),
         "receiptRef": None,
     }
 
@@ -214,6 +265,7 @@ def _public_run(run: dict[str, Any]) -> dict[str, Any]:
 )
 async def create_run(
     request: Request,
+    background_tasks: BackgroundTasks,
     image: UploadFile = File(...),
     application_data: str = Form(...),
     request_id: Optional[str] = Form(None),
@@ -232,11 +284,11 @@ async def create_run(
         )
 
     detected_type = _detect_upload_type(image_bytes)
-    if image.content_type not in SUPPORTED_CONTENT_TYPES or detected_type is None:
+    if detected_type is None:
         _raise_error(
             400,
             "INVALID_FILE_TYPE",
-            "Upload must be a supported jpeg, png, webp, heic, or pdf artifact",
+            "Upload bytes must be a supported jpeg, png, webp, heic, heif, or pdf artifact",
             rid,
             {"contentType": image.content_type, "detectedType": detected_type},
         )
@@ -253,9 +305,11 @@ async def create_run(
         "contentType": detected_type,
         "state": RuntimeState.RECEIVED,
         "events": [],
+        "timings": {},
         "startedAtMonotonic": time.monotonic(),
     }
     _append_event(runs[run_id], "run.created", {"runId": run_id, "artifactSha256": artifact_hash})
+    background_tasks.add_task(_run_skeleton_pipeline, run_id)
 
     return {"runId": run_id, "requestId": rid, "eventsUrl": f"/api/runs/{run_id}/events"}
 
@@ -288,12 +342,15 @@ async def get_run_events(request: Request, run_id: str):
 
     async def event_generator():
         sent = 0
-        for event in run["events"]:
-            sent += 1
-            yield _sse(event["event"], event["data"])
+        while True:
+            while sent < len(run["events"]):
+                event = run["events"][sent]
+                sent += 1
+                yield _sse(event["event"], event["data"])
 
-        await _run_skeleton_pipeline(run)
-        for event in run["events"][sent:]:
-            yield _sse(event["event"], event["data"])
+            if _terminal_state(run):
+                return
+
+            await asyncio.sleep(0.05)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
