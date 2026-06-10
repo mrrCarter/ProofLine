@@ -1085,7 +1085,7 @@ function App() {
                 </div>
               </div>
 
-              <div className="batch-table-wrap">
+              <div className="batch-table-wrap" tabIndex={0} aria-label="Batch results table">
                 <table className="batch-table">
                   <thead>
                     <tr>
