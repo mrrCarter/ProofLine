@@ -58,10 +58,16 @@ jobs:
           SENTINELAYER_TOKEN: ${{ secrets.SENTINELAYER_TOKEN }}
         run: |-
           set -euo pipefail
+          # Fail CLOSED: a merge gate that passes when it cannot run is fail-open.
+          # The secret is configured for this repo, so a missing token means
+          # misconfiguration (or an untrusted fork that cannot access secrets) and
+          # must BLOCK the merge rather than pass vacuously. A maintainer re-runs
+          # from a trusted branch after fixing the secret.
           if [ -z "${SENTINELAYER_TOKEN}" ]; then
-            echo "::warning::SENTINELAYER_TOKEN not set. Run: gh secret set SENTINELAYER_TOKEN --body <token>"
-            echo "Skipping — run locally: npx sentinelayer-cli@latest /omargate deep --path ."
-            exit 0
+            echo "::error::SENTINELAYER_TOKEN is not available — Omar Gate cannot run, failing closed."
+            echo "Set it with: gh secret set SENTINELAYER_TOKEN --repo <owner>/<repo>"
+            echo "Local equivalent: npx sentinelayer-cli@latest /omargate deep --path ."
+            exit 1
           fi
       - name: Run Omar Gate
         id: omar
