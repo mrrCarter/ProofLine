@@ -7,6 +7,9 @@ APP_HOST="${APP_HOST:-127.0.0.1}"
 APP_PORT="${APP_PORT:-8000}"
 HEALTH_INTERVAL_SECONDS="${HEALTH_INTERVAL_SECONDS:-20}"
 RESTART_BACKOFF_SECONDS="${RESTART_BACKOFF_SECONDS:-5}"
+PUBLIC_READY_TIMEOUT_SECONDS="${PUBLIC_READY_TIMEOUT_SECONDS:-180}"
+PUBLIC_READY_POLL_SECONDS="${PUBLIC_READY_POLL_SECONDS:-5}"
+HEALTH_FAILURES_BEFORE_RESTART="${HEALTH_FAILURES_BEFORE_RESTART:-3}"
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 SEED_FILE="${SEED_FILE:-$HOME/.config/proofline/demo-ed25519-seed.b64}"
 PUBLIC_KEY_ID="${PROOFLINE_PUBLIC_KEY_ID:-proofline-demo-2026-06}"
@@ -53,8 +56,7 @@ start_uvicorn() {
   PROOFLINE_ED25519_SEED_B64="$(cat "$SEED_FILE")"
   export VISION_PROVIDER=local
   export UI_STATIC_DIR=ui/dist
-  export BUILD_SHA
-  BUILD_SHA="$(git -C "$PROJECT_ROOT" rev-parse --short HEAD)"
+  export BUILD_SHA="${BUILD_SHA:-$(git -C "$PROJECT_ROOT" rev-parse --short HEAD)}"
 
   (
     cd "$PROJECT_ROOT"
@@ -95,11 +97,27 @@ start_tunnel() {
 }
 
 verify_public_url() {
-  local health
-  health="$(curl -fsS --max-time 10 "$PUBLIC_URL/healthz")"
-  local pubkey
-  pubkey="$(curl -fsS --max-time 10 "$PUBLIC_URL/api/receipts/pubkey")"
-  say "INFRA-GPT5.5 watchdog: public quick tunnel live: $PUBLIC_URL . health=$health pubkey=$pubkey . Backing buildSha=$BUILD_SHA, uvicorn_pid=$UVICORN_PID, cloudflared_pid=$CLOUDFLARED_PID. This is a fallback; named tunnel/AWS remains the durable target."
+  local deadline
+  deadline=$((SECONDS + PUBLIC_READY_TIMEOUT_SECONDS))
+  local health=""
+  local pubkey=""
+
+  while (( SECONDS < deadline )); do
+    if health="$(curl -fsS --max-time 10 "$PUBLIC_URL/healthz" 2>/dev/null)" \
+      && pubkey="$(curl -fsS --max-time 10 "$PUBLIC_URL/api/receipts/pubkey" 2>/dev/null)"; then
+      say "INFRA-GPT5.5 watchdog: public quick tunnel live: $PUBLIC_URL . health=$health pubkey=$pubkey . Backing buildSha=$BUILD_SHA, uvicorn_pid=$UVICORN_PID, cloudflared_pid=$CLOUDFLARED_PID. This is a fallback; named tunnel/AWS remains the durable target."
+      return 0
+    fi
+
+    if ! kill -0 "$CLOUDFLARED_PID" 2>/dev/null; then
+      say "INFRA-GPT5.5 watchdog: cloudflared exited while waiting for $PUBLIC_URL to become publicly healthy."
+      return 1
+    fi
+    sleep "$PUBLIC_READY_POLL_SECONDS"
+  done
+
+  say "INFRA-GPT5.5 watchdog: $PUBLIC_URL did not become publicly healthy within ${PUBLIC_READY_TIMEOUT_SECONDS}s; relaunching."
+  return 1
 }
 
 stop_children() {
@@ -124,6 +142,7 @@ say "INFRA-GPT5.5 watchdog starting from $PROJECT_ROOT. It will relaunch uvicorn
 while true; do
   stop_children
   if start_uvicorn && start_tunnel && verify_public_url; then
+    health_failures=0
     while true; do
       sleep "$HEALTH_INTERVAL_SECONDS"
       if ! kill -0 "$UVICORN_PID" 2>/dev/null; then
@@ -134,9 +153,15 @@ while true; do
         say "INFRA-GPT5.5 watchdog alert: cloudflared exited for $PUBLIC_URL; relaunching after ${RESTART_BACKOFF_SECONDS}s."
         break
       fi
-      if ! curl -fsS --max-time 10 "$PUBLIC_URL/healthz" >/dev/null; then
-        say "INFRA-GPT5.5 watchdog alert: health check failed for $PUBLIC_URL; relaunching after ${RESTART_BACKOFF_SECONDS}s."
-        break
+      if curl -fsS --max-time 10 "$PUBLIC_URL/healthz" >/dev/null; then
+        health_failures=0
+      else
+        health_failures=$((health_failures + 1))
+        say "INFRA-GPT5.5 watchdog warning: health check failed for $PUBLIC_URL (${health_failures}/${HEALTH_FAILURES_BEFORE_RESTART})."
+        if (( health_failures >= HEALTH_FAILURES_BEFORE_RESTART )); then
+          say "INFRA-GPT5.5 watchdog alert: health check failed ${health_failures} consecutive times for $PUBLIC_URL; relaunching after ${RESTART_BACKOFF_SECONDS}s."
+          break
+        fi
       fi
     done
   fi
