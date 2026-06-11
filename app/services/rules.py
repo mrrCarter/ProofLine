@@ -1,3 +1,4 @@
+import os
 import re
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -21,6 +22,7 @@ WARNING_FORMAT_SOURCE_URL = (
     "https://www.ecfr.gov/current/title-27/chapter-I/subchapter-A/part-16/"
     "subpart-C/section-16.22"
 )
+TEST_ONLY_OVERRIDE_ENVS = {"dev", "development", "local", "test"}
 
 
 def normalize_label_text(text: str) -> str:
@@ -81,6 +83,8 @@ def _mapping_value(value: Any, keys: tuple[str, ...]) -> Any:
 
 
 def _test_only_enabled(value: Any) -> bool:
+    if os.getenv("PROOFLINE_ENV", "").strip().casefold() not in TEST_ONLY_OVERRIDE_ENVS:
+        return False
     return value is True or (isinstance(value, str) and value.strip().casefold() in {"1", "true", "yes"})
 
 
@@ -297,7 +301,11 @@ class RuleEngine:
         }
 
     def _computed_warning_format_signal(self, context: dict[str, Any]) -> dict[str, Any]:
-        pipeline_context = context.get("_pipelineComputed") or context.get("pipelineComputed")
+        pipeline_context = (
+            context.get("_pipelineComputed")
+            or context.get("pipelineComputed")
+            or context.get("pipelineContext")
+        )
         format_context = _mapping_value(pipeline_context, ("warningFormat", "warning_format"))
         signal = _mapping_value(
             format_context,
