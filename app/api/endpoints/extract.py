@@ -144,10 +144,6 @@ def _suggest_fields(
     if label_type:
         _put(suggestions, "commodity", label_type, 0.8, "ocr-metadata")
 
-    brand = _brand_candidate(ocr_items, readability_score)
-    if brand:
-        _put(suggestions, "brandName", brand[0], brand[1], "ocr")
-
     class_type = _class_candidate(ocr_items, readability_score)
     if class_type:
         _put(suggestions, "classType", class_type[0], class_type[1], "ocr")
@@ -216,26 +212,6 @@ def _alpha_tokens(text: str) -> list[str]:
 def _has_noise(text: str) -> bool:
     lowered = text.casefold()
     return any(marker in lowered for marker in NOISE_MARKERS)
-
-
-def _brand_candidate(
-    ocr_items: list[dict[str, Any]],
-    readability_score: float,
-) -> Optional[tuple[str, float]]:
-    for item in sorted(ocr_items, key=lambda value: _effective_confidence(value, readability_score), reverse=True):
-        text = _text(item)
-        confidence = _effective_confidence(item, readability_score)
-        lowered = text.casefold()
-        tokens = _alpha_tokens(text)
-        if confidence < READABILITY_CONFIDENT_DECISION_FLOOR:
-            continue
-        if len(tokens) < 2 or _has_noise(text):
-            continue
-        if any(marker in lowered for marker in (" alc", "proof", " ml", " cl", "product of", "imported by")):
-            continue
-        if 2 <= len(text) <= 60:
-            return text, confidence
-    return None
 
 
 def _class_candidate(

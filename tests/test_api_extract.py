@@ -40,7 +40,7 @@ def test_extract_returns_suggestions_from_mock_fixture():
 
     assert body["provider"] == "mock"
     assert suggestions["commodity"]["value"] == "spirits"
-    assert suggestions["brandName"]["value"] == "OLD FORESTER"
+    assert "brandName" not in suggestions
     assert suggestions["classType"]["value"] == "KENTUCKY STRAIGHT BOURBON WHISKY"
     assert suggestions["alcoholContent"]["value"] == "43% ALC/VOL"
     assert "netContents" not in suggestions
@@ -90,7 +90,7 @@ def test_extract_parses_net_contents_and_origin_from_ocr(monkeypatch):
     suggestions = _suggestions_by_key(response.json())
 
     assert suggestions["commodity"]["value"] == "wine"
-    assert suggestions["brandName"]["value"] == "CAVIT PINOT GRIGIO"
+    assert "brandName" not in suggestions
     assert suggestions["classType"]["value"] == "CAVIT PINOT GRIGIO"
     assert suggestions["netContents"]["value"] == "750 mL"
     assert suggestions["origin"]["value"] == "Imported"
