@@ -320,6 +320,34 @@ class RuleEngine:
             "requiredAnchorsVisible": warning_visible and (not name_address_values or name_address_visible),
         }
 
+    def _readability_inputs(
+        self,
+        ocr_results: list[dict[str, Any]],
+        context: dict[str, Any],
+    ) -> tuple[float, float, dict[str, Any]]:
+        rule = self.rules_by_id.get("IMAGE_READABILITY", {})
+        floor = float(rule.get("floor", READABILITY_FLOOR))
+        score = _as_float(_context_value(context, ("readabilityScore", "readability_score")))
+        if score is None:
+            score = _confidence_from_items(ocr_results)
+        score = _clamp(float(score))
+        return floor, score, self._readability_anchor_visibility(ocr_results, context, floor)
+
+    def _warning_evidence_unreadable(
+        self,
+        ocr_results: list[dict[str, Any]],
+        context: dict[str, Any],
+    ) -> bool:
+        floor, score, anchor_visibility = self._readability_inputs(ocr_results, context)
+        if anchor_visibility["warningAnchorVisible"]:
+            return False
+        if score < floor:
+            return True
+        return (
+            anchor_visibility["warningFragmentVisible"]
+            or score < READABILITY_CONFIDENT_DECISION_FLOOR
+        )
+
     def _computed_warning_format_signal(self, context: dict[str, Any]) -> dict[str, Any]:
         pipeline_context = (
             context.get("_pipelineComputed")
@@ -709,12 +737,22 @@ class RuleEngine:
         rule = self.rules_by_id["GOVERNMENT_WARNING_PRESENT"]
         all_text = collapse_statement_whitespace(self._all_ocr_text(ocr_results))
         anchor_present = re.search(r"\bgovernment\s+warning\s*:", all_text, re.IGNORECASE) is not None
+        unreadable_warning_evidence = (
+            not anchor_present and self._warning_evidence_unreadable(ocr_results, context)
+        )
+        status = FindingStatus.PASS if anchor_present else FindingStatus.FAIL
+        if unreadable_warning_evidence:
+            status = FindingStatus.UNREADABLE
         return Finding(
             ruleId="GOVERNMENT_WARNING_PRESENT",
             severity=FindingSeverity(rule.get("severity", "HIGH")),
-            status=FindingStatus.PASS if anchor_present else FindingStatus.FAIL,
+            status=status,
             expected={"anchor": "GOVERNMENT WARNING:"},
-            observed={"text": all_text[:500], "anchorPresent": anchor_present},
+            observed={
+                "text": all_text[:500],
+                "anchorPresent": anchor_present,
+                "blockedByReadability": unreadable_warning_evidence,
+            },
             confidence=_confidence_from_items(ocr_results),
             evidence=Evidence(
                 text=all_text[:500],
@@ -723,9 +761,21 @@ class RuleEngine:
             explanation=(
                 "Government warning anchor was detected."
                 if anchor_present
-                else "Government warning anchor was not detected."
+                else (
+                    "Government warning anchor was not readable enough to support a compliance decision."
+                    if unreadable_warning_evidence
+                    else "Government warning anchor was not detected."
+                )
             ),
-            remediation=None if anchor_present else "Add the required government warning statement.",
+            remediation=(
+                None
+                if anchor_present
+                else (
+                    "Upload a clearer close-up of the warning statement."
+                    if unreadable_warning_evidence
+                    else "Add the required government warning statement."
+                )
+            ),
         )
 
     def _evaluate_warning_exact_text(
@@ -742,7 +792,12 @@ class RuleEngine:
         prefix_case_ok = bool(observation["prefixCaseOk"])
         confidence = _confidence_from_items(ocr_results)
         case_only_mismatch = bool(observation["caseOnlyMismatch"])
+        unreadable_warning_evidence = (
+            not exact_present and self._warning_evidence_unreadable(ocr_results, context)
+        )
         status = FindingStatus.PASS if exact_present else FindingStatus.FAIL
+        if unreadable_warning_evidence:
+            status = FindingStatus.UNREADABLE
         if not exact_present and case_only_mismatch and not prefix_case_ok and confidence < 0.9:
             status = FindingStatus.NEEDS_REVIEW
 
@@ -760,6 +815,7 @@ class RuleEngine:
                 "text": observed[:1000],
                 "prefix": prefix_text,
                 "prefixCaseOk": prefix_case_ok,
+                "blockedByReadability": unreadable_warning_evidence,
             },
             confidence=confidence,
             evidence=Evidence(
@@ -772,10 +828,22 @@ class RuleEngine:
                 else (
                     "Warning prefix capitalization is uncertain because OCR confidence is below 0.9."
                     if status == FindingStatus.NEEDS_REVIEW
-                    else "Government warning text did not match the pinned eCFR statement exactly."
+                    else (
+                        "Government warning text was not readable enough to support an exact-text decision."
+                        if unreadable_warning_evidence
+                        else "Government warning text did not match the pinned eCFR statement exactly."
+                    )
                 )
             ),
-            remediation=None if exact_present else "Use the exact 27 CFR 16.21 warning statement and uppercase prefix.",
+            remediation=(
+                None
+                if exact_present
+                else (
+                    "Upload a clearer close-up of the warning statement."
+                    if unreadable_warning_evidence
+                    else "Use the exact 27 CFR 16.21 warning statement and uppercase prefix."
+                )
+            ),
         )
 
     def _evaluate_warning_format(
@@ -861,12 +929,7 @@ class RuleEngine:
         context: dict[str, Any],
     ) -> Finding:
         rule = self.rules_by_id["IMAGE_READABILITY"]
-        floor = float(rule.get("floor", READABILITY_FLOOR))
-        score = _as_float(_context_value(context, ("readabilityScore", "readability_score")))
-        if score is None:
-            score = _confidence_from_items(ocr_results)
-        score = _clamp(float(score))
-        anchor_visibility = self._readability_anchor_visibility(ocr_results, context, floor)
+        floor, score, anchor_visibility = self._readability_inputs(ocr_results, context)
         status = FindingStatus.PASS
         if score < floor:
             status = FindingStatus.NEEDS_REVIEW if anchor_visibility["requiredAnchorsVisible"] else FindingStatus.UNREADABLE

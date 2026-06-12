@@ -223,7 +223,27 @@ def test_high_confidence_missing_warning_anchor_remains_fail():
     finding = _finding(findings, "IMAGE_READABILITY")
 
     assert finding.status == FindingStatus.PASS
+    assert _finding(findings, "GOVERNMENT_WARNING_PRESENT").status == FindingStatus.FAIL
+    assert _finding(findings, "GOVERNMENT_WARNING_EXACT_TEXT").status == FindingStatus.FAIL
     assert engine.aggregate_verdict(findings) == "FAIL"
+
+
+def test_unreadable_warning_evidence_does_not_render_hard_warning_fail():
+    engine = RuleEngine()
+    findings = engine.evaluate(
+        _ocr("CAVIT PINOT GRIGIO IMPORTED BY PALM BAY HE RISK OF BIRTH DEFECTS", 0.96),
+        {"readabilityScore": 0.57},
+    )
+    warning_present = _finding(findings, "GOVERNMENT_WARNING_PRESENT")
+    warning_text = _finding(findings, "GOVERNMENT_WARNING_EXACT_TEXT")
+    readability = _finding(findings, "IMAGE_READABILITY")
+
+    assert warning_present.status == FindingStatus.UNREADABLE
+    assert warning_present.observed["blockedByReadability"] is True
+    assert warning_text.status == FindingStatus.UNREADABLE
+    assert warning_text.observed["blockedByReadability"] is True
+    assert readability.status == FindingStatus.UNREADABLE
+    assert engine.aggregate_verdict(findings) == "UNREADABLE"
 
 
 def test_low_global_readability_with_required_anchors_routes_review_not_unreadable():
