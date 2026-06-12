@@ -32,7 +32,7 @@ def _ocr_wall_budget_seconds() -> float:
             return max(0.5, float(raw))
         except ValueError:
             pass
-    return 3.0
+    return 2.5
 LABEL_ROI_CROPS = (
     {
         "cropId": "main-label-center",
