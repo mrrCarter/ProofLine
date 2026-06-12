@@ -1,11 +1,12 @@
 import hashlib
 import io
+import re
 import shutil
 import subprocess
 from functools import lru_cache
 from typing import Any, Optional
 
-from PIL import Image
+from PIL import Image, ImageFilter, ImageOps
 
 from .format_signal import compute_region_readability_score, compute_warning_format_signal
 from .preprocess import PreprocessConfig, PreprocessError, preprocess_image
@@ -14,6 +15,32 @@ from .vision_provider import BoundingBox, OCRResult, VisionProvider, VisionRespo
 
 PROVIDER_NAME = "local"
 ENGINE_NAME = "tesseract"
+LABEL_ROI_CROPS = (
+    {
+        "cropId": "main-label-center",
+        "ratios": (0.18, 0.12, 0.86, 0.64),
+        "config": "--oem 1 --psm 6",
+        "scale": 2.2,
+    },
+    {
+        "cropId": "lower-label-center",
+        "ratios": (0.12, 0.50, 0.90, 0.88),
+        "config": "--oem 1 --psm 6",
+        "scale": 2.5,
+    },
+    {
+        "cropId": "warning-band",
+        "ratios": (0.16, 0.61, 0.88, 0.78),
+        "config": "--oem 1 --psm 6",
+        "scale": 3.0,
+    },
+    {
+        "cropId": "lower-label-wide",
+        "ratios": (0.00, 0.56, 1.00, 0.98),
+        "config": "--oem 1 --psm 4",
+        "scale": 2.5,
+    },
+)
 
 
 class LocalVisionProvider(VisionProvider):
@@ -65,6 +92,9 @@ class LocalVisionProvider(VisionProvider):
             )
 
         results = _run_tesseract(preprocessed.image_bytes)
+        roi_results, roi_metadata = _run_warning_roi_passes(preprocessed.image_bytes, results)
+        if roi_results:
+            results = [*results, *roi_results]
         readability = compute_region_readability_score(preprocessed.readability_score, results)
         warning_format = compute_warning_format_signal(preprocessed.image_bytes, results)
         pipeline_context = {
@@ -87,6 +117,7 @@ class LocalVisionProvider(VisionProvider):
                 "status": status,
                 "readability": readability.metadata_payload(),
                 "readabilityFloor": self.preprocess_config.min_readability_score,
+                "roiOcr": roi_metadata,
                 "pipelineContext": pipeline_context,
                 "warningFormat": warning_format.context_payload(),
                 "evidenceCrops": evidence_crops,
@@ -148,10 +179,25 @@ def _pytesseract_version() -> str | None:
 
 
 def _run_tesseract(image_bytes: bytes) -> list[OCRResult]:
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    image.load()
+    return _run_tesseract_image(image)
+
+
+def _run_tesseract_image(
+    image: Image.Image,
+    *,
+    config: str | None = None,
+    offset: tuple[float, float] = (0.0, 0.0),
+    scale: float = 1.0,
+) -> list[OCRResult]:
     import pytesseract  # type: ignore[import-not-found,import-untyped]
 
-    image = Image.open(io.BytesIO(image_bytes))
-    data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
+    data = pytesseract.image_to_data(
+        image,
+        config=config or "",
+        output_type=pytesseract.Output.DICT,
+    )
     results: list[OCRResult] = []
     for idx, text in enumerate(data.get("text", [])):
         clean = text.strip()
@@ -164,10 +210,10 @@ def _run_tesseract(image_bytes: bytes) -> list[OCRResult]:
         if confidence < 0:
             continue
 
-        left = float(data["left"][idx])
-        top = float(data["top"][idx])
-        width = float(data["width"][idx])
-        height = float(data["height"][idx])
+        left = (float(data["left"][idx]) / scale) + offset[0]
+        top = (float(data["top"][idx]) / scale) + offset[1]
+        width = float(data["width"][idx]) / scale
+        height = float(data["height"][idx]) / scale
         results.append(
             OCRResult(
                 text=clean,
@@ -183,3 +229,102 @@ def _run_tesseract(image_bytes: bytes) -> list[OCRResult]:
             )
         )
     return results
+
+
+def _run_warning_roi_passes(
+    image_bytes: bytes,
+    full_results: list[OCRResult],
+) -> tuple[list[OCRResult], dict[str, Any]]:
+    if _has_warning_prefix(full_results):
+        return [], {
+            "enabled": True,
+            "trigger": "warning_prefix_already_detected",
+            "addedTokenCount": 0,
+            "passes": [],
+        }
+
+    try:
+        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        image.load()
+    except OSError:
+        return [], {
+            "enabled": True,
+            "trigger": "warning_prefix_missing",
+            "status": "image_decode_failed",
+            "addedTokenCount": 0,
+            "passes": [],
+        }
+
+    collected: list[OCRResult] = []
+    passes: list[dict[str, Any]] = []
+    for crop_config in LABEL_ROI_CROPS:
+        crop_id = str(crop_config["cropId"])
+        ratios = crop_config["ratios"]
+        config = str(crop_config["config"])
+        scale = float(crop_config["scale"])
+        crop_box = _ratio_box(ratios, image.size)
+        crop = image.crop(crop_box)
+        enhanced = _enhance_ocr_crop(crop, scale)
+        crop_results = _run_tesseract_image(
+            enhanced,
+            config=config,
+            offset=(float(crop_box[0]), float(crop_box[1])),
+            scale=scale,
+        )
+        passes.append(
+            {
+                "cropId": crop_id,
+                "bbox": _box_vertices(crop_box),
+                "config": config,
+                "scale": scale,
+                "tokenCount": len(crop_results),
+                "warningPrefixDetected": _has_warning_prefix(crop_results),
+            }
+        )
+        collected.extend(crop_results)
+
+    return collected, {
+        "enabled": True,
+        "trigger": "warning_prefix_missing",
+        "addedTokenCount": len(collected),
+        "passes": passes,
+        "warningPrefixRecovered": _has_warning_prefix(collected),
+    }
+
+
+def _enhance_ocr_crop(crop: Image.Image, scale: float) -> Image.Image:
+    grayscale = ImageOps.grayscale(crop)
+    enhanced = ImageOps.autocontrast(grayscale)
+    width = max(1, int(round(enhanced.width * scale)))
+    height = max(1, int(round(enhanced.height * scale)))
+    resampling = getattr(Image, "Resampling", Image).LANCZOS
+    enhanced = enhanced.resize((width, height), resampling)
+    enhanced = enhanced.filter(ImageFilter.UnsharpMask(radius=1.2, percent=150, threshold=3))
+    return enhanced.convert("RGB")
+
+
+def _has_warning_prefix(results: list[OCRResult]) -> bool:
+    text = " ".join(item.text for item in results if item.text)
+    return re.search(r"\bgovernment\s+warning\s*:", text, re.IGNORECASE) is not None
+
+
+def _ratio_box(
+    ratios: tuple[float, float, float, float],
+    size: tuple[int, int],
+) -> tuple[int, int, int, int]:
+    width, height = size
+    left = max(0, min(width - 1, int(round(width * ratios[0]))))
+    top = max(0, min(height - 1, int(round(height * ratios[1]))))
+    right = max(left + 1, min(width, int(round(width * ratios[2]))))
+    bottom = max(top + 1, min(height, int(round(height * ratios[3]))))
+    return (left, top, right, bottom)
+
+
+def _box_vertices(box: tuple[int, int, int, int]) -> list[list[float]]:
+    left, top, right, bottom = box
+    return [
+        [float(left), float(top)],
+        [float(right), float(top)],
+        [float(right), float(bottom)],
+        [float(left), float(bottom)],
+    ]

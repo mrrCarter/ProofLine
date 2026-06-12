@@ -126,6 +126,66 @@ def test_local_provider_emits_pipeline_context_and_crop(monkeypatch):
     assert response.metadata["evidenceCrops"][0]["ruleId"] == "GOVERNMENT_WARNING_FORMAT_SIGNAL"
 
 
+def test_local_provider_retries_warning_roi_when_full_ocr_misses_prefix(monkeypatch):
+    image_bytes = _image_bytes(warning_width=5, body_width=1)
+    full_results = [
+        OCRResult(
+            text="ALCOHOL IMPAIRS MAY CAUSE HEALTH",
+            confidence=0.91,
+            bbox=BoundingBox(vertices=_bbox(20, 120, 330, 145)["vertices"]),
+        )
+    ]
+    roi_calls = []
+
+    def fake_roi_ocr(image, *, config=None, offset=(0.0, 0.0), scale=1.0):
+        roi_calls.append({"size": image.size, "config": config, "offset": offset, "scale": scale})
+        left = int(offset[0])
+        top = int(offset[1])
+        return [
+            OCRResult(
+                text="GOVERNMENT",
+                confidence=0.88,
+                bbox=BoundingBox(vertices=_bbox(left + 12, top + 8, left + 144, top + 34)["vertices"]),
+            ),
+            OCRResult(
+                text="WARNING:",
+                confidence=0.9,
+                bbox=BoundingBox(vertices=_bbox(left + 150, top + 8, left + 272, top + 34)["vertices"]),
+            ),
+        ]
+
+    monkeypatch.setattr(local_vision, "_tesseract_available", lambda: True)
+    monkeypatch.setattr(local_vision, "_run_tesseract", lambda _: full_results)
+    monkeypatch.setattr(local_vision, "_run_tesseract_image", fake_roi_ocr)
+    monkeypatch.setattr(
+        local_vision,
+        "preprocess_image",
+        lambda *_: PreprocessResult(
+            image_bytes=image_bytes,
+            content_type="image/png",
+            width=420,
+            height=180,
+            readability_score=0.97,
+            metrics={"readabilityScore": 0.97},
+        ),
+    )
+
+    response = asyncio.run(LocalVisionProvider().process_image(image_bytes, artifact_hash="synthetic"))
+
+    assert roi_calls
+    assert [item.text for item in response.results][-2:] == ["GOVERNMENT", "WARNING:"]
+    assert response.metadata["roiOcr"]["trigger"] == "warning_prefix_missing"
+    assert response.metadata["roiOcr"]["addedTokenCount"] == len(local_vision.LABEL_ROI_CROPS) * 2
+    assert response.metadata["roiOcr"]["warningPrefixRecovered"] is True
+    assert {item["cropId"] for item in response.metadata["roiOcr"]["passes"]} == {
+        "main-label-center",
+        "lower-label-center",
+        "warning-band",
+        "lower-label-wide",
+    }
+    assert all(item["warningPrefixDetected"] is True for item in response.metadata["roiOcr"]["passes"])
+
+
 def test_local_provider_lifts_low_global_readability_when_text_regions_are_legible(monkeypatch):
     image_bytes = _image_bytes(warning_width=5, body_width=1)
     ocr_results = [
