@@ -64,11 +64,24 @@ type RunState = {
 };
 
 type LabelFields = {
+  commodity: string;
   brandName: string;
   classType: string;
   alcoholContent: string;
   netContents: string;
   origin: string;
+  countryOfOrigin: string;
+  producerName: string;
+  producerCity: string;
+  producerState: string;
+};
+
+type FieldSuggestion = {
+  key: keyof LabelFields;
+  label: string;
+  value: string;
+  confidence?: number;
+  source?: string;
 };
 
 type Sample = {
@@ -110,16 +123,48 @@ type EvidencePreview = {
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 const REQUEST_TIMEOUT_MS = 15_000;
 const RUN_WATCHDOG_MS = 15_000;
+const MAX_BATCH_FILES = 10;
 
 const PNG_1X1_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 
 const emptyFields: LabelFields = {
+  commodity: "",
   brandName: "",
   classType: "",
   alcoholContent: "",
   netContents: "",
-  origin: ""
+  origin: "",
+  countryOfOrigin: "",
+  producerName: "",
+  producerCity: "",
+  producerState: ""
+};
+
+const fieldLabels: Record<keyof LabelFields, string> = {
+  commodity: "Product type",
+  brandName: "Brand name",
+  classType: "Class / type",
+  alcoholContent: "Alcohol content",
+  netContents: "Net contents",
+  origin: "Origin status",
+  countryOfOrigin: "Country of origin",
+  producerName: "Producer / bottler",
+  producerCity: "Producer city",
+  producerState: "Producer state"
+};
+
+const fieldAliases: Record<keyof LabelFields, string[]> = {
+  commodity: ["commodity", "labelType", "productType", "productCategory"],
+  brandName: ["brandName", "brand", "brand_name", "applicantBrandName"],
+  classType: ["classType", "class", "class_type", "productClass", "productTypeText"],
+  alcoholContent: ["alcoholContent", "alcohol", "abv", "alcoholByVolume", "alcByVol"],
+  netContents: ["netContents", "netContent", "net_contents", "volume", "containerSize"],
+  origin: ["origin", "originType", "importStatus", "isImported", "imported"],
+  countryOfOrigin: ["countryOfOrigin", "country", "originCountry", "country_of_origin"],
+  producerName: ["producerName", "bottlerName", "applicantName", "importerName", "name"],
+  producerCity: ["producerCity", "bottlerCity", "importerCity", "city"],
+  producerState: ["producerState", "bottlerState", "importerState", "state"]
 };
 
 const samples: Sample[] = [
@@ -130,6 +175,8 @@ const samples: Sample[] = [
     expected: "FAIL",
     variant: "fail",
     fields: {
+      ...emptyFields,
+      commodity: "spirits",
       brandName: "Old Forester",
       classType: "Bourbon Whisky",
       alcoholContent: "43% ABV",
@@ -145,6 +192,8 @@ const samples: Sample[] = [
     expected: "FAIL",
     variant: "fail",
     fields: {
+      ...emptyFields,
+      commodity: "spirits",
       brandName: "Old Forester",
       classType: "Bourbon Whisky",
       alcoholContent: "45% ABV",
@@ -160,11 +209,14 @@ const samples: Sample[] = [
     expected: "NEEDS_REVIEW",
     variant: "review",
     fields: {
+      ...emptyFields,
+      commodity: "spirits",
       brandName: "Highland Sample",
       classType: "Single Malt Whisky",
       alcoholContent: "46% ABV",
       netContents: "700 mL",
-      origin: "Imported"
+      origin: "Imported",
+      countryOfOrigin: "Scotland"
     },
     imagePath: "/fixtures/import_missing_origin.png"
   }
@@ -200,8 +252,10 @@ function deriveImported(origin: string): boolean | undefined {
 function applicationPayload(fields: LabelFields): Record<string, unknown> {
   const originType = fields.origin.trim();
   const imported = deriveImported(originType);
+  const commodity = fields.commodity.trim().toLowerCase();
   return {
     ...fields,
+    commodity,
     originType,
     ...(imported === undefined ? {} : { imported, isImported: imported })
   };
@@ -303,6 +357,95 @@ function readNumber(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function normalizeFieldName(value: string): string {
+  return value.replace(/[^a-z0-9]+/gi, "").toLowerCase();
+}
+
+function fieldKeyFromName(value: unknown): keyof LabelFields | null {
+  if (typeof value !== "string") return null;
+  const normalized = normalizeFieldName(value);
+  for (const key of Object.keys(fieldAliases) as Array<keyof LabelFields>) {
+    if (normalizeFieldName(key) === normalized) return key;
+    if (fieldAliases[key].some((alias) => normalizeFieldName(alias) === normalized)) return key;
+  }
+  return null;
+}
+
+function suggestionValue(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return value ? "Imported" : "Domestic";
+  const source = asRecord(value);
+  for (const key of ["value", "text", "raw", "normalized", "display"]) {
+    if (!(key in source)) continue;
+    const next = suggestionValue(source[key]);
+    if (next) return next;
+  }
+  return "";
+}
+
+function suggestionConfidence(value: unknown): number | undefined {
+  const source = asRecord(value);
+  const confidence = source.confidence ?? source.score;
+  return typeof confidence === "number" && Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : undefined;
+}
+
+function suggestionSource(value: unknown): string | undefined {
+  const source = asRecord(value);
+  const sourceValue = source.source ?? source.provider ?? source.ruleId;
+  return typeof sourceValue === "string" && sourceValue.trim() ? sourceValue : undefined;
+}
+
+function normalizeSuggestionItem(key: keyof LabelFields, value: unknown): FieldSuggestion | null {
+  const nextValue = suggestionValue(value);
+  if (!nextValue) return null;
+  return {
+    key,
+    label: fieldLabels[key],
+    value: nextValue,
+    confidence: suggestionConfidence(value),
+    source: suggestionSource(value)
+  };
+}
+
+function normalizeFieldSuggestions(payload: unknown): FieldSuggestion[] {
+  const source = asRecord(payload);
+  const rawSuggestions = source.suggestedFields ?? source.fields ?? source.extractedFields ?? source.suggestions ?? payload;
+  const suggestions = new Map<keyof LabelFields, FieldSuggestion>();
+
+  if (Array.isArray(rawSuggestions)) {
+    rawSuggestions.forEach((item) => {
+      const itemRecord = asRecord(item);
+      const key = fieldKeyFromName(itemRecord.key ?? itemRecord.field ?? itemRecord.name ?? itemRecord.id);
+      if (!key) return;
+      const suggestion = normalizeSuggestionItem(key, itemRecord.value ?? itemRecord.text ?? itemRecord.raw ?? item);
+      if (suggestion) {
+        suggestion.confidence = suggestion.confidence ?? suggestionConfidence(item);
+        suggestion.source = suggestion.source ?? suggestionSource(item);
+        suggestions.set(key, suggestion);
+      }
+    });
+    return [...suggestions.values()];
+  }
+
+  const suggestionRecord = asRecord(rawSuggestions);
+  for (const key of Object.keys(fieldAliases) as Array<keyof LabelFields>) {
+    const aliases = [key, ...fieldAliases[key]];
+    for (const alias of aliases) {
+      if (!(alias in suggestionRecord)) continue;
+      const suggestion = normalizeSuggestionItem(key, suggestionRecord[alias]);
+      if (suggestion) suggestions.set(key, suggestion);
+      break;
+    }
+  }
+  return [...suggestions.values()];
+}
+
 function normalizeBatchRow(value: unknown, index: number): BatchRow {
   const source = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const verdict = readString(source.verdict, "") as Verdict;
@@ -336,10 +479,14 @@ async function labelImageFile(sample: Sample): Promise<File> {
 function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const batchInputRef = useRef<HTMLInputElement | null>(null);
+  const extractionRequestRef = useRef(0);
   const [mode, setMode] = useState<Mode>("single");
   const [file, setFile] = useState<File | null>(null);
-  const [batchFile, setBatchFile] = useState<File | null>(null);
+  const [batchFiles, setBatchFiles] = useState<File[]>([]);
   const [fields, setFields] = useState<LabelFields>(emptyFields);
+  const [fieldSuggestions, setFieldSuggestions] = useState<FieldSuggestion[]>([]);
+  const [isExtractingFields, setIsExtractingFields] = useState(false);
+  const [extractError, setExtractError] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [runState, setRunState] = useState<RunState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -364,10 +511,14 @@ function App() {
   }, [file]);
 
   const selectedBatchLabel = useMemo(() => {
-    if (!batchFile) return "No batch selected";
-    const sizeKb = Math.max(1, Math.round(batchFile.size / 1024));
-    return `${batchFile.name} - ${sizeKb} KB`;
-  }, [batchFile]);
+    if (!batchFiles.length) return "No batch selected";
+    if (batchFiles.length === 1) {
+      const [selected] = batchFiles;
+      const sizeKb = Math.max(1, Math.round(selected.size / 1024));
+      return `${selected.name} - ${sizeKb} KB`;
+    }
+    return `${batchFiles.length}/${MAX_BATCH_FILES} labels selected`;
+  }, [batchFiles]);
 
   const terminalVerdict = runState?.verdict ?? null;
 
@@ -431,25 +582,7 @@ function App() {
     setFields((current) => ({ ...current, [key]: value }));
   }
 
-  async function applySample(sample: Sample) {
-    setPreparingSampleId(sample.id);
-    setMode("single");
-    setFields(sample.fields);
-    setTimeline([]);
-    setRunState(null);
-    setError(null);
-    setIsPreviewOpen(false);
-    setEvidencePreview(null);
-    try {
-      setFile(await labelImageFile(sample));
-    } finally {
-      setPreparingSampleId(null);
-    }
-  }
-
-  function onFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const nextFile = event.target.files?.[0] ?? null;
-    setFile(nextFile);
+  function resetSingleRunState() {
     setTimeline([]);
     setRunState(null);
     setError(null);
@@ -457,9 +590,7 @@ function App() {
     setEvidencePreview(null);
   }
 
-  function onBatchFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const nextFile = event.target.files?.[0] ?? null;
-    setBatchFile(nextFile);
+  function resetBatchRunState() {
     setBatchRows([]);
     setBatchTimeline([]);
     setBatchError(null);
@@ -467,32 +598,116 @@ function App() {
     setBatchExportUrl(null);
   }
 
+  function selectLabelFile(nextFile: File | null, extractFields = true) {
+    extractionRequestRef.current += 1;
+    setFile(nextFile);
+    resetSingleRunState();
+    setFieldSuggestions([]);
+    setExtractError(null);
+    setIsExtractingFields(false);
+    if (nextFile && extractFields) void extractSuggestedFields(nextFile, extractionRequestRef.current);
+  }
+
+  async function extractSuggestedFields(nextFile: File, requestId: number) {
+    setIsExtractingFields(true);
+    setExtractError(null);
+
+    const form = new FormData();
+    form.append("image", nextFile);
+
+    try {
+      const response = await fetchWithTimeout(`${API_BASE}/api/extract`, { method: "POST", body: form });
+      if (requestId !== extractionRequestRef.current) return;
+      if (response.status === 404 || response.status === 405) {
+        throw new Error("Field extraction is not available in this build.");
+      }
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error?.message ?? "Field extraction failed.");
+      }
+
+      const payload = await response.json();
+      const suggestions = normalizeFieldSuggestions(payload);
+      setFieldSuggestions(suggestions);
+      if (!suggestions.length) setExtractError("No fields were extracted from this image.");
+    } catch (caught) {
+      if (requestId === extractionRequestRef.current) setExtractError(stringifyError(caught, "Field extraction failed."));
+    } finally {
+      if (requestId === extractionRequestRef.current) setIsExtractingFields(false);
+    }
+  }
+
+  function applyFieldSuggestions() {
+    setFields((current) => {
+      const next = { ...current };
+      fieldSuggestions.forEach((suggestion) => {
+        next[suggestion.key] = suggestion.value;
+      });
+      return next;
+    });
+  }
+
+  async function applySample(sample: Sample) {
+    setPreparingSampleId(sample.id);
+    setMode("single");
+    setFields(sample.fields);
+    setFieldSuggestions([]);
+    setExtractError(null);
+    resetSingleRunState();
+    try {
+      selectLabelFile(await labelImageFile(sample), false);
+    } finally {
+      setPreparingSampleId(null);
+    }
+  }
+
+  function onFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const nextFile = event.target.files?.[0] ?? null;
+    selectLabelFile(nextFile);
+  }
+
+  function addBatchFiles(nextFiles: FileList | File[]) {
+    const incoming = Array.from(nextFiles);
+    if (!incoming.length) return;
+
+    setBatchRows([]);
+    setBatchTimeline([]);
+    setBatchId(null);
+    setBatchExportUrl(null);
+
+    const seen = new Set(batchFiles.map((item) => `${item.name}:${item.size}:${item.lastModified}`));
+    const uniqueIncoming = incoming.filter((item) => {
+      const key = `${item.name}:${item.size}:${item.lastModified}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    const accepted = [...batchFiles, ...uniqueIncoming].slice(0, MAX_BATCH_FILES);
+    setBatchFiles(accepted);
+    setBatchError(batchFiles.length + uniqueIncoming.length > MAX_BATCH_FILES ? `Batch is capped at ${MAX_BATCH_FILES} labels for this prototype.` : null);
+  }
+
+  function removeBatchFile(index: number) {
+    setBatchFiles((current) => current.filter((_, itemIndex) => itemIndex !== index));
+    resetBatchRunState();
+  }
+
+  function onBatchFileChange(event: ChangeEvent<HTMLInputElement>) {
+    if (event.target.files) addBatchFiles(event.target.files);
+    event.target.value = "";
+  }
+
   function onDrop(event: React.DragEvent<HTMLLabelElement>) {
     event.preventDefault();
     setIsDragging(false);
     const nextFile = event.dataTransfer.files?.[0] ?? null;
-    if (nextFile) {
-      setFile(nextFile);
-      setTimeline([]);
-      setRunState(null);
-      setError(null);
-      setIsPreviewOpen(false);
-      setEvidencePreview(null);
-    }
+    if (nextFile) selectLabelFile(nextFile);
   }
 
   function onBatchDrop(event: React.DragEvent<HTMLLabelElement>) {
     event.preventDefault();
     setIsDraggingBatch(false);
-    const nextFile = event.dataTransfer.files?.[0] ?? null;
-    if (nextFile) {
-      setBatchFile(nextFile);
-      setBatchRows([]);
-      setBatchTimeline([]);
-      setBatchError(null);
-      setBatchId(null);
-      setBatchExportUrl(null);
-    }
+    if (event.dataTransfer.files?.length) addBatchFiles(event.dataTransfer.files);
   }
 
   async function refreshRun(runId: string) {
@@ -670,8 +885,8 @@ function App() {
 
   async function startBatch(event: FormEvent) {
     event.preventDefault();
-    if (!batchFile) {
-      setBatchError("Select a batch zip or multi-file artifact first.");
+    if (!batchFiles.length) {
+      setBatchError("Select up to 10 label images or a batch artifact first.");
       return;
     }
 
@@ -683,7 +898,7 @@ function App() {
     setIsBatchRunning(true);
 
     const form = new FormData();
-    form.append("files", batchFile);
+    batchFiles.forEach((selectedFile) => form.append("files", selectedFile));
     form.append("application_data", JSON.stringify(applicationPayload(fields)));
 
     try {
@@ -713,6 +928,7 @@ function App() {
 
   async function runDemoBatch() {
     setMode("batch");
+    setBatchFiles([]);
     setBatchError(null);
     setBatchTimeline([]);
     setBatchRows([]);
@@ -860,6 +1076,16 @@ function App() {
             </section>
 
             <section className="fields-band" aria-label="Application fields">
+              <SuggestedFieldsPanel
+                suggestions={fieldSuggestions}
+                isExtracting={isExtractingFields}
+                error={extractError}
+                onApply={applyFieldSuggestions}
+                onDismiss={() => {
+                  setFieldSuggestions([]);
+                  setExtractError(null);
+                }}
+              />
               <FieldGrid fields={fields} updateField={updateField} />
 
               <div className="action-row">
@@ -895,6 +1121,8 @@ function App() {
               <strong>{terminalVerdict ? verdictMeta[terminalVerdict].label : isRunning ? "RUNNING" : "WAITING"}</strong>
             </div>
           </section>
+
+          {terminalVerdict === "UNREADABLE" && runState?.findings.length ? <RetakeGuidance findings={runState.findings} /> : null}
 
           <section className="results-grid">
             <div className="findings-panel">
@@ -977,15 +1205,40 @@ function App() {
                 onDragLeave={() => setIsDraggingBatch(false)}
                 onDrop={onBatchDrop}
               >
-                <input ref={batchInputRef} type="file" accept=".zip,.csv,image/png,image/jpeg,image/webp,application/zip" onChange={onBatchFileChange} />
+                <input ref={batchInputRef} type="file" accept=".zip,.csv,image/png,image/jpeg,image/webp,application/zip" multiple onChange={onBatchFileChange} />
                 <span className="drop-icon">
                   <UploadCloud size={34} aria-hidden="true" />
                 </span>
-                <span className="drop-title">Drop batch artifact</span>
+                <span className="drop-title">Drop labels or batch artifact</span>
                 <span className="drop-file">{selectedBatchLabel}</span>
               </label>
+              {batchFiles.length ? (
+                <div className="batch-file-list" aria-label="Queued labels">
+                  {batchFiles.map((selectedFile, index) => {
+                    const sizeKb = Math.max(1, Math.round(selectedFile.size / 1024));
+                    return (
+                      <div className="batch-file-item" key={`${selectedFile.name}-${selectedFile.size}-${selectedFile.lastModified}`}>
+                        <span>
+                          <strong>{selectedFile.name}</strong>
+                          <small>{sizeKb} KB</small>
+                        </span>
+                        <button
+                          className="mini-icon-button"
+                          type="button"
+                          aria-label={`Remove ${selectedFile.name}`}
+                          title="Remove"
+                          disabled={isBatchRunning}
+                          onClick={() => removeBatchFile(index)}
+                        >
+                          <X size={16} aria-hidden="true" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
               <div className="batch-actions">
-                <button className="verify-button" type="submit" disabled={isBatchRunning}>
+                <button className="verify-button" type="submit" disabled={isBatchRunning || !batchFiles.length}>
                   {isBatchRunning ? <Loader2 className="spin" size={22} aria-hidden="true" /> : <Play size={22} aria-hidden="true" />}
                   Start batch
                 </button>
@@ -1131,6 +1384,15 @@ function FieldGrid({
   return (
     <div className="field-grid">
       <label>
+        Product type
+        <select value={fields.commodity} onChange={(event) => updateField("commodity", event.target.value)}>
+          <option value="">Select type</option>
+          <option value="spirits">Spirits</option>
+          <option value="wine">Wine</option>
+          <option value="malt">Malt beverage</option>
+        </select>
+      </label>
+      <label>
         Brand name
         <input value={fields.brandName} onChange={(event) => updateField("brandName", event.target.value)} autoComplete="off" />
       </label>
@@ -1150,11 +1412,188 @@ function FieldGrid({
         Origin
         <input value={fields.origin} onChange={(event) => updateField("origin", event.target.value)} autoComplete="off" />
       </label>
+      <label>
+        Country of origin
+        <input value={fields.countryOfOrigin} onChange={(event) => updateField("countryOfOrigin", event.target.value)} autoComplete="off" />
+      </label>
+      <label className="wide">
+        Producer / bottler
+        <input value={fields.producerName} onChange={(event) => updateField("producerName", event.target.value)} autoComplete="off" />
+      </label>
+      <label>
+        Producer city
+        <input value={fields.producerCity} onChange={(event) => updateField("producerCity", event.target.value)} autoComplete="off" />
+      </label>
+      <label>
+        Producer state
+        <input value={fields.producerState} onChange={(event) => updateField("producerState", event.target.value)} autoComplete="off" />
+      </label>
     </div>
   );
 }
 
-function TimelinePanel({ items, title = "Orchestrator Timeline" }: { items: TimelineEvent[]; title?: string }) {
+function SuggestedFieldsPanel({
+  suggestions,
+  isExtracting,
+  error,
+  onApply,
+  onDismiss
+}: {
+  suggestions: FieldSuggestion[];
+  isExtracting: boolean;
+  error: string | null;
+  onApply: () => void;
+  onDismiss: () => void;
+}) {
+  if (!isExtracting && !suggestions.length && !error) return null;
+  return (
+    <div className="suggestion-panel" aria-live="polite">
+      <div className="suggestion-panel-header">
+        <div>
+          <strong>Extracted fields</strong>
+          <span>{isExtracting ? "Reading label text" : suggestions.length ? `${suggestions.length} suggestions` : "No suggestions"}</span>
+        </div>
+        <button className="mini-icon-button" type="button" aria-label="Dismiss extracted fields" onClick={onDismiss}>
+          <X size={18} aria-hidden="true" />
+        </button>
+      </div>
+      {isExtracting ? (
+        <div className="suggestion-status">
+          <Loader2 className="spin" size={18} aria-hidden="true" />
+          <span>Extracting</span>
+        </div>
+      ) : null}
+      {error ? (
+        <div className="suggestion-status warning">
+          <AlertTriangle size={18} aria-hidden="true" />
+          <span>{error}</span>
+        </div>
+      ) : null}
+      {suggestions.length ? (
+        <>
+          <div className="suggestion-list">
+            {suggestions.map((suggestion) => (
+              <div className="suggestion-item" key={suggestion.key}>
+                <span>{suggestion.label}</span>
+                <strong>{suggestion.value}</strong>
+                {suggestion.confidence !== undefined ? <small>{Math.round(suggestion.confidence * 100)}%</small> : null}
+              </div>
+            ))}
+          </div>
+          <p className="suggestion-help">Save extracted values to the application fields, then adjust anything before verifying.</p>
+          <button className="secondary-button compact" type="button" onClick={onApply}>
+            <CheckCircle2 size={18} aria-hidden="true" />
+            Save extracted fields
+          </button>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function RetakeGuidance({ findings }: { findings: Finding[] }) {
+  const readFields = findings.filter((finding) => finding.status === "PASS").map((finding) => ruleLabel(finding.ruleId));
+  const retakeFields = findings
+    .filter((finding) => finding.status === "UNREADABLE" || finding.ruleId === "IMAGE_READABILITY")
+    .map((finding) => ruleLabel(finding.ruleId));
+
+  return (
+    <section className="retake-guidance" aria-label="Retake guidance">
+      <div>
+        <strong>What the verifier could read</strong>
+        {readFields.length ? (
+          <ul>
+            {readFields.map((label) => (
+              <li key={label}>{label}</li>
+            ))}
+          </ul>
+        ) : (
+          <p>No required fields were read confidently.</p>
+        )}
+      </div>
+      <div>
+        <strong>What needs a clearer photo</strong>
+        {retakeFields.length ? (
+          <ul>
+            {retakeFields.map((label) => (
+              <li key={label}>{label}</li>
+            ))}
+          </ul>
+        ) : (
+          <p>Review the findings below before deciding whether to retake.</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+type TimelineTone = "pass" | "fail" | "review" | "pending" | "unreadable";
+
+function toneForStatus(status: unknown): TimelineTone {
+  if (status === "PASS") return "pass";
+  if (status === "FAIL" || status === "ERROR") return "fail";
+  if (status === "NEEDS_REVIEW") return "review";
+  if (status === "UNREADABLE") return "unreadable";
+  return "pending";
+}
+
+function timelineTone(item: TimelineEvent): TimelineTone {
+  if (item.event.includes("failed")) return "fail";
+  if (item.event === "run.completed") return toneForStatus(item.data.verdict ?? item.data.status);
+  if (item.event === "rule.evaluated") return toneForStatus(item.data.status);
+  if (item.event.includes("completed")) return "pass";
+  if (item.event.includes("escalated") || item.event.includes("opinion")) return "review";
+  return "pending";
+}
+
+function timelineLabel(eventName: string) {
+  const labels: Record<string, string> = {
+    "run.created": "Run received",
+    "preprocess.completed": "Image prepared",
+    "ocr.completed": "OCR completed",
+    "field.extracted": "Field extracted",
+    "rule.evaluated": "Rule evaluated",
+    "run.escalated": "Review requested",
+    "agent.spawned": "Reviewer spawned",
+    "agent.opinion": "Reviewer opinion",
+    "run.completed": "Run completed",
+    "batch.created": "Batch received",
+    "batch.item.queued": "Label queued",
+    "batch.item.started": "Label started",
+    "batch.item.completed": "Label completed",
+    "batch.item.failed": "Label failed",
+    "batch.completed": "Batch completed",
+    "batch.failed": "Batch failed"
+  };
+  return labels[eventName] ?? eventName;
+}
+
+function timelineSummary(item: TimelineEvent) {
+  if (item.event === "ocr.completed") {
+    const confidence = typeof item.data.confidence === "number" ? `, ${Math.round(item.data.confidence * 100)}% confidence` : "";
+    const latency = typeof item.data.latencyMs === "number" ? `, ${item.data.latencyMs} ms` : "";
+    return `${String(item.data.provider ?? "OCR")}${confidence}${latency}`;
+  }
+  if (item.event === "field.extracted") {
+    const field = String(item.data.field ?? "field");
+    const value = item.data.value == null || item.data.value === "" ? "no value" : String(item.data.value);
+    return `${field}: ${value}`;
+  }
+  if (item.event === "rule.evaluated") {
+    const rule = item.data.ruleId ? ruleLabel(String(item.data.ruleId)) : "Rule";
+    return `${rule}: ${String(item.data.status ?? "pending")}`;
+  }
+  if (item.event === "run.completed") {
+    const verdict = String(item.data.verdict ?? item.data.status ?? "complete");
+    const latency = typeof item.data.latencyMs === "number" ? ` in ${item.data.latencyMs} ms` : "";
+    return `${verdict}${latency}`;
+  }
+  if (item.data.runId) return `Run ${String(item.data.runId).slice(0, 8)}`;
+  if (item.data.fileName) return String(item.data.fileName);
+  return "Waiting for the next event";
+}
+
+function TimelinePanel({ items, title = "Verification Steps" }: { items: TimelineEvent[]; title?: string }) {
   return (
     <div className="timeline-panel">
       <div className="section-heading">
@@ -1163,21 +1602,33 @@ function TimelinePanel({ items, title = "Orchestrator Timeline" }: { items: Time
       </div>
       <ol className="timeline-list">
         {items.length ? (
-          items.map((item) => (
-            <li key={item.id}>
-              <span className="timeline-dot" aria-hidden="true" />
-              <div>
-                <strong>{item.event}</strong>
-                <code>{JSON.stringify(item.data)}</code>
-              </div>
-            </li>
-          ))
+          items.map((item) => {
+            const tone = timelineTone(item);
+            const Icon = tone === "fail" ? XCircle : tone === "pending" ? Loader2 : tone === "review" || tone === "unreadable" ? AlertTriangle : CheckCircle2;
+            return (
+              <li className={`timeline-item ${tone}`} key={item.id}>
+                <span className="timeline-icon" aria-hidden="true">
+                  <Icon className={tone === "pending" ? "spin" : undefined} size={15} />
+                </span>
+                <div className="timeline-copy">
+                  <strong>{timelineLabel(item.event)}</strong>
+                  <span>{timelineSummary(item)}</span>
+                  <details>
+                    <summary>Event data</summary>
+                    <code>{JSON.stringify(item.data, null, 2)}</code>
+                  </details>
+                </div>
+              </li>
+            );
+          })
         ) : (
-          <li className="timeline-empty">
-            <span className="timeline-dot" aria-hidden="true" />
-            <div>
+          <li className="timeline-item pending">
+            <span className="timeline-icon" aria-hidden="true">
+              <Clock3 size={15} />
+            </span>
+            <div className="timeline-copy">
               <strong>Ready</strong>
-              <code>{"{}"}</code>
+              <span>Events will appear as the verifier reads the label.</span>
             </div>
           </li>
         )}
