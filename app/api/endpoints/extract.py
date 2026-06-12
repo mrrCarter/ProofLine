@@ -6,7 +6,7 @@ from fastapi import APIRouter, File, Request, UploadFile
 
 from app.api.endpoints.runs import MAX_UPLOAD_BYTES, _detect_upload_type, _raise_error
 from app.services.factory import get_vision_provider
-from app.services.rules import RuleEngine
+from app.services.rules import READABILITY_CONFIDENT_DECISION_FLOOR, RuleEngine
 
 
 router = APIRouter()
@@ -40,6 +40,32 @@ CLASS_KEYWORDS = {
     "whiskey",
     "whisky",
     "wine",
+}
+COUNTRY_NAMES = {
+    "argentina": "Argentina",
+    "australia": "Australia",
+    "canada": "Canada",
+    "chile": "Chile",
+    "france": "France",
+    "germany": "Germany",
+    "italy": "Italy",
+    "mexico": "Mexico",
+    "new zealand": "New Zealand",
+    "portugal": "Portugal",
+    "south africa": "South Africa",
+    "spain": "Spain",
+    "united states": "United States",
+    "usa": "United States",
+}
+NOISE_MARKERS = {
+    "birth defects",
+    "contains sulfites",
+    "government warning",
+    "health problems",
+    "impairs",
+    "pregnancy",
+    "surgeon general",
+    "warning",
 }
 COUNTRY_PATTERN = re.compile(
     r"\b(?:product\s+of|imported\s+from|produce\s+of)\s+([A-Z][A-Za-z .'-]{2,40})",
@@ -89,6 +115,7 @@ async def extract_fields(
     suggestion_items = _suggest_fields(
         [{"text": item.text, "confidence": item.confidence} for item in ocr.results],
         ocr.metadata,
+        ocr.readability_score,
     )
     suggested_fields = {item["key"]: item for item in suggestion_items}
     return {
@@ -103,6 +130,7 @@ async def extract_fields(
 def _suggest_fields(
     ocr_items: list[dict[str, Any]],
     metadata: dict[str, Any],
+    readability_score: float,
 ) -> list[dict[str, Any]]:
     status = str(metadata.get("status", ""))
     if status == "mock_unknown_hash":
@@ -116,11 +144,11 @@ def _suggest_fields(
     if label_type:
         _put(suggestions, "commodity", label_type, 0.8, "ocr-metadata")
 
-    brand = _brand_candidate(ocr_items)
+    brand = _brand_candidate(ocr_items, readability_score)
     if brand:
         _put(suggestions, "brandName", brand[0], brand[1], "ocr")
 
-    class_type = _class_candidate(ocr_items)
+    class_type = _class_candidate(ocr_items, readability_score)
     if class_type:
         _put(suggestions, "classType", class_type[0], class_type[1], "ocr")
 
@@ -132,14 +160,14 @@ def _suggest_fields(
     if net_contents:
         _put(suggestions, "netContents", str(net_contents["raw"]), 0.9, "ocr")
 
-    country = _country_candidate(all_text)
+    country = _country_candidate(ocr_items, readability_score)
     if country:
         _put(suggestions, "origin", "Imported", 0.8, "ocr")
         _put(suggestions, "countryOfOrigin", country, 0.8, "ocr")
 
-    producer = _producer_candidate(all_text)
+    producer = _producer_candidate(ocr_items, readability_score)
     if producer:
-        _put(suggestions, "producerName", producer, 0.7, "ocr")
+        _put(suggestions, "producerName", producer[0], producer[1], "ocr")
 
     return list(suggestions.values())
 
@@ -173,42 +201,92 @@ def _confidence(item: dict[str, Any]) -> float:
     return float(value) if isinstance(value, (int, float)) else 0.0
 
 
+def _effective_confidence(item: dict[str, Any], readability_score: float) -> float:
+    return min(_confidence(item), float(readability_score))
+
+
 def _clean_value(value: Any) -> Optional[str]:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
-def _brand_candidate(ocr_items: list[dict[str, Any]]) -> Optional[tuple[str, float]]:
-    for item in sorted(ocr_items, key=_confidence, reverse=True):
+def _alpha_tokens(text: str) -> list[str]:
+    return re.findall(r"[a-z]+", text.casefold())
+
+
+def _has_noise(text: str) -> bool:
+    lowered = text.casefold()
+    return any(marker in lowered for marker in NOISE_MARKERS)
+
+
+def _brand_candidate(
+    ocr_items: list[dict[str, Any]],
+    readability_score: float,
+) -> Optional[tuple[str, float]]:
+    for item in sorted(ocr_items, key=lambda value: _effective_confidence(value, readability_score), reverse=True):
         text = _text(item)
+        confidence = _effective_confidence(item, readability_score)
         lowered = text.casefold()
-        if _confidence(item) < 0.75:
+        tokens = _alpha_tokens(text)
+        if confidence < READABILITY_CONFIDENT_DECISION_FLOOR:
             continue
-        if any(marker in lowered for marker in ("government warning", "alc", "proof", " ml", " cl", "product of")):
+        if len(tokens) < 2 or _has_noise(text):
+            continue
+        if any(marker in lowered for marker in (" alc", "proof", " ml", " cl", "product of", "imported by")):
             continue
         if 2 <= len(text) <= 60:
-            return text, _confidence(item)
+            return text, confidence
     return None
 
 
-def _class_candidate(ocr_items: list[dict[str, Any]]) -> Optional[tuple[str, float]]:
-    for item in sorted(ocr_items, key=_confidence, reverse=True):
+def _class_candidate(
+    ocr_items: list[dict[str, Any]],
+    readability_score: float,
+) -> Optional[tuple[str, float]]:
+    for item in sorted(ocr_items, key=lambda value: _effective_confidence(value, readability_score), reverse=True):
         text = _text(item)
         tokens = set(re.findall(r"[a-z0-9]+", text.casefold()))
-        if _confidence(item) >= 0.7 and tokens & CLASS_KEYWORDS:
-            return text, _confidence(item)
+        if len(_alpha_tokens(text)) < 2 or _has_noise(text):
+            continue
+        confidence = _effective_confidence(item, readability_score)
+        if confidence >= READABILITY_CONFIDENT_DECISION_FLOOR and tokens & CLASS_KEYWORDS:
+            return text, confidence
     return None
 
 
-def _country_candidate(text: str) -> Optional[str]:
-    match = COUNTRY_PATTERN.search(text)
-    return match.group(1).strip(" ,.;:") if match else None
+def _country_candidate(
+    ocr_items: list[dict[str, Any]],
+    readability_score: float,
+) -> Optional[str]:
+    for item in sorted(ocr_items, key=lambda value: _effective_confidence(value, readability_score), reverse=True):
+        if _effective_confidence(item, readability_score) < 0.75:
+            continue
+        match = COUNTRY_PATTERN.search(_text(item))
+        if not match:
+            continue
+        country = " ".join(match.group(1).strip(" ,.;:").casefold().split())
+        if country in COUNTRY_NAMES:
+            return COUNTRY_NAMES[country]
+    return None
 
 
-def _producer_candidate(text: str) -> Optional[str]:
-    match = PRODUCER_PATTERN.search(text)
-    if not match:
-        return None
-    return match.group(1).split("  ", 1)[0].strip(" ,.;:")
+def _producer_candidate(
+    ocr_items: list[dict[str, Any]],
+    readability_score: float,
+) -> Optional[tuple[str, float]]:
+    for item in sorted(ocr_items, key=lambda value: _effective_confidence(value, readability_score), reverse=True):
+        confidence = _effective_confidence(item, readability_score)
+        if confidence < READABILITY_CONFIDENT_DECISION_FLOOR:
+            continue
+        text = _text(item)
+        if _has_noise(text):
+            continue
+        match = PRODUCER_PATTERN.search(text)
+        if not match:
+            continue
+        producer = match.group(1).split("  ", 1)[0].strip(" ,.;:")
+        if 2 <= len(_alpha_tokens(producer)) <= 10:
+            return producer, confidence
+    return None
 
 
 def _alcohol_candidate(text: str) -> Optional[dict[str, Any]]:
