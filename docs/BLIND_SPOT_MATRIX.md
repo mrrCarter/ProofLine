@@ -1,7 +1,7 @@
 # Blind-Spot Matrix — ProofLine
 
-Owner: **VERIFY-01**. Created after the F1 miss (a clean label could never reach PASS through the
-real UI, because `warningBoldSignal` was never computed and the eval fixtures *injected* the answer).
+Created after an early miss where a clean label could never reach PASS through the
+real UI, because `warningBoldSignal` was never computed and the eval fixtures *injected* the answer.
 
 ## The rule that produced F1, stated once
 
