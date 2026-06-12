@@ -2,7 +2,11 @@
 
 **Evidence-receipt label verification for TTB-style review: upload a label plus the application fields, get PASS / FAIL / NEEDS_REVIEW / UNREADABLE in under five seconds, each verdict carrying a cryptographically signed evidence receipt that records exactly what was checked, by which rule pack, at which version.**
 
-ProofLine is a take-home prototype for a US Treasury / TTB-style alcohol-label verification assessment. It ships as a single FastAPI container with deliberately in-process prototype storage, in-container OCR, a deterministic YAML rule engine, Ed25519-signed receipts, an SSE-streamed state machine, and an async batch pipeline. The pitch in one line: **a compliance engine that issues a cryptographically signed evidence receipt for every verdict — provable, reproducible, and honest about what a photo can and cannot show.**
+### ▶ Live demo: **<https://proofline.aidenid.com>**
+
+A Treasury reviewer can click straight through to the running prototype — real in-container OCR, signed receipts, zero outbound calls.
+
+ProofLine is a take-home prototype for a US Treasury / TTB-style alcohol-label verification assessment, **built in roughly two days** for this assessment. It ships as a single FastAPI container with deliberately in-process prototype storage, in-container OCR, a deterministic YAML rule engine, Ed25519-signed receipts, an SSE-streamed state machine, and an async batch pipeline. The pitch in one line: **a compliance engine that issues a cryptographically signed evidence receipt for every verdict — provable, reproducible, and honest about what a photo can and cannot show.**
 
 > Honesty is a design goal here, not a disclaimer at the bottom. Where a photo cannot prove something (font weight, millimetre type size), ProofLine says so in the finding rather than guessing. Where a dependency could not be installed on the target runtime, this README explains the real reason. Graders are senior engineers; this document is written for them.
 
@@ -296,7 +300,7 @@ These are deliberate and documented. Fake completeness loses to honest limits wi
 - **The VLM adjudicator is advisory and off by default.** It is wired *only* after a deterministic NEEDS_REVIEW, is env-gated OFF, has a 10 s timeout and a circuit breaker, and can only annotate toward NEEDS_REVIEW — it can never flip a deterministic PASS/FAIL. The happy path never waits on it.
 - **The local compose demo runs `VISION_PROVIDER=local` and explicitly dev-only ephemeral receipts** so uploads exercise real in-container Tesseract without needing a local host install. Deterministic `mock` remains available for tests and fixture debugging. Submitted demos should additionally run `PROOFLINE_ENV=production` with a stable receipt seed and `PROOFLINE_PUBLIC_KEY_ID`; both OCR modes honor law 2 (zero required outbound), but only the stable-key path gives restart-stable receipt verification.
 - **Container base-image digests and apt OCR package versions are pinned for reproducibility.** For this take-home prototype, CVE/base refresh happens as a reviewed PR when rebuilding the image; an automated refresh bot is intentionally out of scope.
-- **No live deployed URL.** AWS deploy is parked pending credentials; the scaling path is written, not deployed. Everything in this README is reproducible from origin with `docker compose up` and `pytest`.
+- **The live demo runs behind a named Cloudflare tunnel** (<https://proofline.aidenid.com>), serving the same single container you get from `docker compose up`. The production-grade deploy (ECS/Fargate + CloudFront) is written as the scaling target, not stood up for this prototype. Everything in this README is also reproducible from origin with `docker compose up` and `pytest`.
 
 ---
 
@@ -337,9 +341,15 @@ A few process choices that show up in the artifact:
 
 ## What's parked (so nothing here is varnish)
 
-- **Live deployment** (ECS/Fargate + CloudFront + DNS) is written but **not deployed** — parked pending AWS credentials. No live URL is claimed.
+- **Production-grade deployment** (ECS/Fargate + CloudFront + WAF) is written as the scaling target but not stood up — the live demo runs on a named Cloudflare tunnel in front of the same container.
 - **PaddleOCR accuracy bench** is deferred until a Python runtime with `paddlepaddle` wheels (or a 3.12-pinned container) exists.
 - **SQLite-WAL/local-artifact persistence and the S3/Postgres adapters** are parked design targets; the running prototype uses in-process storage for the single-container slice.
 - Playwright/axe UI smoke and `pip-audit`/secret scanning are part of the intended gate set per SPEC §10; the security gate wired into CI here is the Omar Gate.
+
+### Roadmap / backlog (next, if this graduated past the prototype)
+
+- **Run history + optional login.** A lightweight, opt-in account flow: hit "Verify," and if you choose to save, the run is attached to your history; if not, it stays an ephemeral session-scoped run (24–48h TTL keyed to a browser session token, not the IP) and is dropped on expiry or promoted to your account on later sign-in. The signed receipt is already a durable, independently re-verifiable record, so this is a convenience layer, not the source of truth — and it stays out of the verdict/critical path.
+- **OCR-autofill.** Upload the label first; the five application fields pre-fill from extraction (user-confirmed and editable) so an agent types almost nothing.
+- **Hyperscale.** Horizontal OCR workers behind a queue (the in-process asyncio queue is already the seam), Postgres for runs/findings, receipts to immutable object storage (S3 Object Lock), rule packs distributed as signed artifacts, and an inside-the-firewall OCR variant via the same provider seam.
 
 Everything not in this "parked" list is in the repo and reproducible from origin (`proofline/takehome-v0`) with `docker compose up` and `pytest`.
