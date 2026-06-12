@@ -2,9 +2,7 @@
 
 **ProofLine: evidence-receipt label verification for TTB-style review.**
 
-One sentence for humans: upload a label and the application fields, get PASS / NEEDS_REVIEW / FAIL / UNREADABLE in under 5 seconds, with a cryptographically signed evidence receipt explaining every finding.
-
-One sentence for the interview: a governed-AI compliance engine, built by a governed-AI engineering swarm, with signed receipts at both layers.
+In one sentence: upload a label and the application fields, get PASS / NEEDS_REVIEW / FAIL / UNREADABLE in under 5 seconds, with a cryptographically signed evidence receipt explaining every finding.
 
 **Project type:** take-home prototype (Treasury/TTB-style assessment) with a documented venture-grade scaling path. Deadline-driven: 1–3 day build, submit well inside the one-week window.
 
@@ -12,7 +10,7 @@ One sentence for the interview: a governed-AI compliance engine, built by a gove
 
 ## 0. Non-negotiable design laws
 
-Every agent memorizes these five. Everything else in this spec serves them.
+Everything else in this spec serves these five.
 
 1. **5 seconds or it doesn't exist.** Single-label verdict p95 ≤ 5s, p50 ≤ 3s. A CI eval fails the build if fixtures exceed budget. (Sarah: the last vendor died at 30–40s.)
 2. **Nothing leaves the box.** Default pipeline (OCR included) runs entirely inside the container. Zero outbound calls required for the deployed demo to work. Cloud OCR/VLM adapters exist but are env-gated OFF. (Marcus: their firewall killed the last vendor's ML endpoints.)
@@ -70,7 +68,7 @@ Storage: SQLite (WAL mode) for runs/findings/receipts + local artifact volume. S
 
 ### Why this and not the alternatives
 
-**Rejected: swarm-per-label runtime.** Cost: 10–40s and dollars per label, non-deterministic verdicts on a compliance task, fails laws 1–3 simultaneously. Agents enter only on escalation, where ambiguity makes them worth their latency. The state machine decides when agents are allowed in the room. (This is the v1 pushback, kept and sharpened: it is also the interview's strongest sentence.)
+**Rejected: an LLM-agent-per-label runtime.** Cost: 10–40s and dollars per label, non-deterministic verdicts on a compliance task, fails laws 1–3 simultaneously. The adjudicator is consulted only on escalation, where ambiguity makes it worth its latency. The state machine decides when escalation is allowed.
 
 **Rejected: single grounded-schema LLM.** Plausible JSON, unauditable reasoning, irreproducible verdicts, hopeless at verbatim regulatory text, and requires outbound calls (law 2). Used only as the gated adjudicator.
 
@@ -78,12 +76,12 @@ Storage: SQLite (WAL mode) for runs/findings/receipts + local artifact volume. S
 
 **Rejected: cloud OCR as priority 1 (v1 spec).** Marcus's story is the lesson: the last vendor's outbound ML calls got firewalled. Azure Document Intelligence remains an env-gated adapter and the documented Azure-container production path, but the deployed demo depends on nothing external. Bonus: no third-party key can expire and break the URL three days later when a grader finally clicks it.
 
-### Runtime FSM (mirror of the AIdenID clearance philosophy)
+### Runtime FSM
 
 `RECEIVED → PREPROCESSED → EXTRACTED → RULED → {PASS | FAIL | NEEDS_REVIEW | UNREADABLE}`
 with `RULED → ESCALATED → ADJUDICATED → NEEDS_REVIEW(annotated)` and `* → ERROR`.
 
-Every transition emits an SSE event. Same 6-outcome philosophy as AIdenID clearance (allow/deny/queue/sandbox/throttle/priced ↔ pass/fail/review/unreadable/escalated/error). Say that sentence in the interview.
+Every transition emits an SSE event, so the verdict path is visible rather than narrated.
 
 ---
 
@@ -125,7 +123,7 @@ Batch math, stated honestly in README: 300 labels on a 2-vCPU Fargate task with 
 
 ### Warning-statement canonicalization (the trap they will test)
 
-Required text per **27 CFR 16.21** — RULES-01 must fetch the live eCFR text at build time, pin it as a constant character-for-character, and put the citation URL + retrieval date in a comment. Do not trust any model's memory of it, including this spec's. Expected constant:
+Required text per **27 CFR 16.21** — the live eCFR text is fetched at build time, pinned as a constant character-for-character, with the citation URL + retrieval date in a comment. Do not trust any model's memory of it, including this spec's. Expected constant:
 
 > GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.
 
@@ -160,7 +158,7 @@ Per run, generate and store:
 }
 ```
 
-Sign canonical JSON with Ed25519 (PyNaCl). Result-cache key is `(artifactSha256, normalizedApplicationDataHash, rulePackVersion)`; the application-data hash is computed from normalized application fields with canonical JSON ordering. Endpoints: `GET /api/receipts/:runId`, `GET /api/receipts/pubkey`, `POST /api/receipts/verify`. README includes a 5-line verification snippet. Interview line: "any verdict can be independently re-verified years later — same pattern as AIdenID's clearance receipts." ~1 hour of work, infinite differentiation.
+Sign canonical JSON with Ed25519 (PyNaCl). Result-cache key is `(artifactSha256, normalizedApplicationDataHash, rulePackVersion)`; the application-data hash is computed from normalized application fields with canonical JSON ordering. Endpoints: `GET /api/receipts/:runId`, `GET /api/receipts/pubkey`, `POST /api/receipts/verify`. README includes a 5-line verification snippet. The point: any verdict can be independently re-verified years later against a published public key.
 
 ---
 
@@ -195,17 +193,9 @@ Single page, three zones top-to-bottom: (1) drop zone + "Try these" gallery, (2)
 
 ---
 
-## 8. Build-swarm governance (the part that wins the interview)
+## 8. Engineering process
 
-The build itself runs under the same philosophy as the product:
-
-- **Identity:** each agent gets an ephemeral AIdenID identity at session start (`sl ai identity provision --execute`); identities listed in the room and revoked at session end (`sl ai identity revoke`).
-- **Credential scoping (hard rule):** only INFRA-01 holds deploy credentials, via a dedicated `proofline-deployer` IAM role/profile restricted to `proofline-*`-tagged resources (ECR repo, ECS service, target group, log group) and a single Cloudflare token scoped to the one DNS record. No agent ever touches the default profile, the aidenid.com hosted zone, or org-wide tokens. GitHub access via a fine-grained PAT scoped to this repo only.
-- **Destructive-op stop list (extends AGENTS.md stop conditions):** `aws s3 rb`, `aws ecs delete-*`, `aws ecr delete-repository`, any route53/cloudfront mutation outside the proofline record, `terraform destroy`, `gh repo delete`, force-push to main. These require an explicit human message in the Senti room.
-- **Evidence:** every privileged action (deploy, DNS, secret injection) is posted to the room with command + outcome, no secret values. The session transcript becomes the build's own evidence receipt.
-- **Gates:** Omar Gate (`sl /omargate deep`) on every PR, P0/P1 block; `sl audit --path . --json` full 15-agent swarm before the final PR.
-
-README gets a section: **"How we governed our own swarm"** — roster, identity receipts, scoped credentials, gate results. The interview line: "we didn't just build a governed verifier; we built it under governance, and here are the receipts for both layers."
+Evidence-gated and reproducible from `origin`: no milestone is "done" until its CI gate is green and reproducible from a pushed commit. Every privileged action (deploy, DNS, secret injection) is recorded with command + outcome and no secret values. The security gate (Omar Gate) runs on every PR and blocks the merge on P0/P1 findings.
 
 ---
 
@@ -245,7 +235,7 @@ README architecture section carries the math: 150K applications/year ≈ 600/wor
 
 ---
 
-## 12. Competitive position (June 2026, for README + interview)
+## 12. Competitive position (June 2026)
 
 - **COLAClear** — public beta May 2026; producer-side TTB pre-screen (CV + LLM for ambiguity + CFR-grounded rules). Validates the architecture and the timing. Their lane: producers pre-submission. Our lane: the reviewer side — batch triage of importer dumps, queue prioritization, and signed receipts an agency can audit. Same engine, opposite side of the counter.
 - **Sovos ShipCompliant** — beverage-compliance workflow incumbent with COLA submission integration; workflow suite, not evidence infrastructure.
@@ -254,10 +244,10 @@ README architecture section carries the math: 150K applications/year ≈ 600/wor
 
 Wedge sentence: "Everyone can OCR a label. We issue the signed receipt that proves what was checked, by which rules, at which version — and we govern the AI that helped." Five Forces summary lives in README appendix; supplier power neutralized by local OCR + adapters, substitute (manual review) attacked at the queue, not at the judgment.
 
-If Treasury never calls back: ProofLine is not a label company. It is the first vertical demo of **AIdenID Receipts** — evidence-receipt infrastructure for regulated AI decisions (labels today; KYC docs, claims, safety filings next). Harvest the pattern, keep the demo, feed the J2 dual-use thesis.
+Beyond labels, the same pattern generalizes: evidence-receipt infrastructure for regulated decisions (labels today; KYC documents, claims, and safety filings next).
 
 ---
 
 ## 13. Acceptance criteria (Definition of Done)
 
-Deployed URL live behind CloudFront with healthz green · cold-grader 30-second trap demo works · single-label p95 ≤ 4.5s proven by CI eval output pasted in README · 50-label batch completes with progress + CSV export · all §10 fixtures produce expected verdicts · receipts download and verify against pubkey · works with all outbound egress blocked (tested) · README has setup, env, demo script, traceability table, trade-offs, scaling path, swarm-governance section · lint/typecheck/tests/build/audit green · Omar Gate no P0/P1 · `sl audit` clean · TODO evidence table filled · LESSONS updated with every correction.
+Deployed URL live behind CloudFront with healthz green · cold-grader 30-second trap demo works · single-label p95 ≤ 4.5s proven by CI eval output pasted in README · 50-label batch completes with progress + CSV export · all §10 fixtures produce expected verdicts · receipts download and verify against pubkey · works with all outbound egress blocked (tested) · README has setup, env, demo script, traceability table, trade-offs, and scaling path · lint/typecheck/tests/build/audit green · Omar Gate no P0/P1.
