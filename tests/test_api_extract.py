@@ -97,6 +97,53 @@ def test_extract_parses_net_contents_and_origin_from_ocr(monkeypatch):
     assert suggestions["countryOfOrigin"]["value"] == "Italy"
 
 
+def test_extract_omits_noisy_hard_bottle_guesses(monkeypatch):
+    class FakeProvider:
+        async def process_image(self, image_bytes, artifact_hash=None):
+            return VisionResponse(
+                results=[
+                    OCRResult(
+                        text="ORIGIN",
+                        confidence=0.96,
+                        bbox=BoundingBox(vertices=[[0, 0], [10, 0], [10, 10], [0, 10]]),
+                    ),
+                    OCRResult(
+                        text="PINOT",
+                        confidence=0.96,
+                        bbox=BoundingBox(vertices=[[0, 12], [10, 12], [10, 22], [0, 22]]),
+                    ),
+                    OCRResult(
+                        text="Product of ITALY wo",
+                        confidence=0.94,
+                        bbox=BoundingBox(vertices=[[0, 24], [10, 24], [10, 34], [0, 34]]),
+                    ),
+                    OCRResult(
+                        text="Imported by CAVIT GOVERNMENT WARNING health problems",
+                        confidence=0.92,
+                        bbox=BoundingBox(vertices=[[0, 36], [10, 36], [10, 46], [0, 46]]),
+                    ),
+                    OCRResult(
+                        text="12.5 750",
+                        confidence=0.96,
+                        bbox=BoundingBox(vertices=[[0, 48], [10, 48], [10, 58], [0, 58]]),
+                    ),
+                ],
+                readability_score=0.57,
+                metadata={"provider": "fake", "status": "fake_success"},
+            )
+
+    monkeypatch.setattr(extract_endpoint, "get_vision_provider", lambda: FakeProvider())
+    client = _client()
+
+    response = client.post(
+        "/api/extract",
+        files={"image": ("tiny.png", MINIMAL_PNG, "image/png")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["suggestedFields"] == {}
+
+
 def test_extract_rejects_invalid_file_type():
     client = _client()
 
