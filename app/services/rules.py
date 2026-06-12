@@ -348,6 +348,22 @@ class RuleEngine:
             or score < READABILITY_CONFIDENT_DECISION_FLOOR
         )
 
+    def _field_evidence_unreadable(
+        self,
+        ocr_results: list[dict[str, Any]],
+        context: dict[str, Any],
+    ) -> bool:
+        floor, score, anchor_visibility = self._readability_inputs(ocr_results, context)
+        if score < floor:
+            return True
+        return (
+            not anchor_visibility["requiredAnchorsVisible"]
+            and (
+                anchor_visibility["warningFragmentVisible"]
+                or score < READABILITY_CONFIDENT_DECISION_FLOOR
+            )
+        )
+
     def _computed_warning_format_signal(self, context: dict[str, Any]) -> dict[str, Any]:
         pipeline_context = (
             context.get("_pipelineComputed")
@@ -451,6 +467,12 @@ class RuleEngine:
         normalized_expected = self.normalize(expected_text)
         best_ratio, best_match, best_normalized = self._best_text_match(expected_text, ocr_results)
         status = FindingStatus.PASS if best_ratio >= threshold else FindingStatus.FAIL
+        blocked_by_readability = status == FindingStatus.FAIL and self._field_evidence_unreadable(
+            ocr_results,
+            context,
+        )
+        if blocked_by_readability:
+            status = FindingStatus.UNREADABLE
         best_text = str(best_match.get("text", "")) if best_match else None
 
         return Finding(
@@ -458,7 +480,12 @@ class RuleEngine:
             severity=FindingSeverity(rule.get("severity", "HIGH")),
             status=status,
             expected={"raw": expected_text, "normalized": normalized_expected, "threshold": threshold},
-            observed={"raw": best_text, "normalized": best_normalized, "score": round(best_ratio, 4)},
+            observed={
+                "raw": best_text,
+                "normalized": best_normalized,
+                "score": round(best_ratio, 4),
+                "blockedByReadability": blocked_by_readability,
+            },
             confidence=round(best_ratio, 4),
             evidence=Evidence(
                 text=best_text,
@@ -468,9 +495,21 @@ class RuleEngine:
             explanation=(
                 f"{label} matched after bounded normalization."
                 if status == FindingStatus.PASS
-                else f"{label} did not meet the bounded fuzzy-match threshold."
+                else (
+                    f"{label} could not be read well enough to support a mismatch decision."
+                    if blocked_by_readability
+                    else f"{label} did not meet the bounded fuzzy-match threshold."
+                )
             ),
-            remediation=None if status == FindingStatus.PASS else f"Confirm the application {label.lower()} matches label text.",
+            remediation=(
+                None
+                if status == FindingStatus.PASS
+                else (
+                    "Upload a clearer close-up of this field."
+                    if blocked_by_readability
+                    else f"Confirm the application {label.lower()} matches label text."
+                )
+            ),
         )
 
     def _expected_alcohol(self, context: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -518,13 +557,24 @@ class RuleEngine:
         tolerance = float(rule.get("toleranceAbv", ABV_TOLERANCE))
         observed = self._parse_alcohol(self._all_ocr_text(ocr_results))
         if observed is None:
+            blocked_by_readability = self._field_evidence_unreadable(ocr_results, context)
             return self._missing_finding(
                 "ALCOHOL_CONTENT_MATCH",
                 rule,
                 expected,
-                "Alcohol content was not detected on the label.",
-                "Add alcohol content as ABV or proof.",
+                (
+                    "Alcohol content could not be read well enough to support a mismatch decision."
+                    if blocked_by_readability
+                    else "Alcohol content was not detected on the label."
+                ),
+                (
+                    "Upload a clearer close-up of the alcohol statement."
+                    if blocked_by_readability
+                    else "Add alcohol content as ABV or proof."
+                ),
                 context,
+                status=FindingStatus.UNREADABLE if blocked_by_readability else FindingStatus.FAIL,
+                observed={"blockedByReadability": blocked_by_readability},
             )
 
         delta = abs(float(expected["abv"]) - float(observed["abv"]))
@@ -581,13 +631,24 @@ class RuleEngine:
         tolerance = float(rule.get("toleranceMl", NET_CONTENTS_TOLERANCE_ML))
         observed = self._parse_net_contents(self._all_ocr_text(ocr_results))
         if observed is None:
+            blocked_by_readability = self._field_evidence_unreadable(ocr_results, context)
             return self._missing_finding(
                 "NET_CONTENTS_MATCH",
                 rule,
                 expected,
-                "Net contents were not detected on the label.",
-                "Add the required net contents statement.",
+                (
+                    "Net contents could not be read well enough to support a mismatch decision."
+                    if blocked_by_readability
+                    else "Net contents were not detected on the label."
+                ),
+                (
+                    "Upload a clearer close-up of the net contents statement."
+                    if blocked_by_readability
+                    else "Add the required net contents statement."
+                ),
                 context,
+                status=FindingStatus.UNREADABLE if blocked_by_readability else FindingStatus.FAIL,
+                observed={"blockedByReadability": blocked_by_readability},
             )
 
         delta = abs(float(expected["ml"]) - float(observed["ml"]))
@@ -986,13 +1047,16 @@ class RuleEngine:
         explanation: str,
         remediation: str,
         context: dict[str, Any],
+        *,
+        status: FindingStatus = FindingStatus.FAIL,
+        observed: Optional[dict[str, Any]] = None,
     ) -> Finding:
         return Finding(
             ruleId=rule_id,
             severity=FindingSeverity(rule.get("severity", "HIGH")),
-            status=FindingStatus.FAIL,
+            status=status,
             expected=expected,
-            observed=None,
+            observed=observed,
             confidence=0.0,
             evidence=Evidence(provider=context.get("ocr_provider") or context.get("provider")),
             explanation=explanation,

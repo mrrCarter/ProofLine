@@ -246,6 +246,38 @@ def test_unreadable_warning_evidence_does_not_render_hard_warning_fail():
     assert engine.aggregate_verdict(findings) == "UNREADABLE"
 
 
+def test_unreadable_field_evidence_does_not_render_hard_field_failures():
+    engine = RuleEngine()
+    findings = engine.evaluate(
+        _ocr("CAVIT PINOT GRI IMPORTED BY PALM BAY HE RISK OF BIRTH DEFECTS", 0.96),
+        {
+            "classType": "Pinot Grigio",
+            "abv": "12.5% ABV",
+            "netContents": "750 mL",
+            "readabilityScore": 0.57,
+        },
+    )
+
+    for rule_id in ("CLASS_TYPE_MATCH", "ALCOHOL_CONTENT_MATCH", "NET_CONTENTS_MATCH"):
+        finding = _finding(findings, rule_id)
+        assert finding.status == FindingStatus.UNREADABLE
+        assert finding.observed["blockedByReadability"] is True
+
+    assert engine.aggregate_verdict(findings) == "UNREADABLE"
+
+
+def test_readable_missing_numeric_fields_still_fail():
+    engine = RuleEngine()
+    findings = engine.evaluate(
+        _ocr("OLD FORESTER KENTUCKY STRAIGHT BOURBON WHISKY", 0.97),
+        {"abv": "43% ABV", "netContents": "750 mL", "readabilityScore": 0.97},
+    )
+
+    assert _finding(findings, "ALCOHOL_CONTENT_MATCH").status == FindingStatus.FAIL
+    assert _finding(findings, "NET_CONTENTS_MATCH").status == FindingStatus.FAIL
+    assert engine.aggregate_verdict(findings) == "FAIL"
+
+
 def test_low_global_readability_with_required_anchors_routes_review_not_unreadable():
     engine = RuleEngine()
     findings = engine.evaluate(
