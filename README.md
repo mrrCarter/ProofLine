@@ -2,7 +2,7 @@
 
 **Evidence-receipt label verification for TTB-style review: upload a label plus the application fields, get PASS / FAIL / NEEDS_REVIEW / UNREADABLE in under five seconds, each verdict carrying a cryptographically signed evidence receipt that records exactly what was checked, by which rule pack, at which version.**
 
-ProofLine is a take-home prototype for a US Treasury / TTB-style alcohol-label verification assessment. It ships as a single FastAPI container with deliberately in-process prototype storage, in-container OCR, a deterministic YAML rule engine, Ed25519-signed receipts, an SSE-streamed state machine, and an async batch pipeline — built by a *governed multi-LLM swarm* whose coordination is itself documented and evidence-gated. The pitch in one line: **a governed-AI compliance engine, built by a governed-AI engineering swarm, with signed receipts at both layers.**
+ProofLine is a take-home prototype for a US Treasury / TTB-style alcohol-label verification assessment. It ships as a single FastAPI container with deliberately in-process prototype storage, in-container OCR, a deterministic YAML rule engine, Ed25519-signed receipts, an SSE-streamed state machine, and an async batch pipeline. The pitch in one line: **a compliance engine that issues a cryptographically signed evidence receipt for every verdict — provable, reproducible, and honest about what a photo can and cannot show.**
 
 > Honesty is a design goal here, not a disclaimer at the bottom. Where a photo cannot prove something (font weight, millimetre type size), ProofLine says so in the finding rather than guessing. Where a dependency could not be installed on the target runtime, this README explains the real reason. Graders are senior engineers; this document is written for them.
 
@@ -173,7 +173,7 @@ Upload validation is server-side: ≤ 15 MB, **magic-byte** sniffing for jpeg / 
 
 ## Rule packs
 
-Versioned YAML, one per commodity, every receipt stamped `rulePackId@version` (e.g. `spirits-v1@1.0.0`). `spirits-v1` is complete; `wine-v1` and `malt-v1` ship to prove the pack mechanism handles commodity variation. The engine selects a pack from the application's `commodity` field and caches one engine per commodity.
+Versioned YAML, one per commodity, every receipt stamped `rulePackId@version` (e.g. `spirits-v1@1.0.0`). `spirits-v1` is complete; `wine-v1` and `malt-v1` ship to prove the pack mechanism handles commodity variation. The engine picks a pack by commodity — taken from an explicit `commodity` field when present, otherwise inferred from the label `classType` (e.g. a "Pinot Grigio" routes to `wine-v1`, a "Bourbon Whiskey" to `spirits-v1`) — and caches one engine per commodity.
 
 **Spirits v1 checks** (real `ruleId`s from `rules/spirits-v1.yaml`):
 
@@ -324,28 +324,14 @@ Wedge: *"Everyone can OCR a label. We issue the signed receipt that proves what 
 
 ---
 
-## How we governed our own swarm
+## Engineering rigor
 
-ProofLine's differentiator is that it was **built under the same philosophy it enforces.** It was produced by a governed multi-LLM engineering swarm coordinated through the Sentinelayer "Senti" room, under ephemeral identities, file-level locks, and an **evidence-gated phase protocol**.
+A few process choices that show up in the artifact:
 
-**Roster** (model tiers confirmed at session start, not stale-claimed):
-
-| Agent | Role | Model | Credential scope |
-|---|---|---|---|
-| **ORCH-01** | Orchestrator / integration captain — phases, locks, merge order, final gates | Claude Opus 4.8 | repo-scoped GitHub PAT |
-| **API / RULES / UI-01** | FastAPI pipeline, endpoints, SSE, receipts, FSM; rule packs + normalization + warning canonicalization; React SPA | GPT-5.5 | none beyond repo |
-| **INFRA-01** | Dockerfile, compose, CI gate, deploy plumbing | Gemini 3.1 | the *only* agent with cloud creds — a `proofline-deployer` profile scoped to `proofline-*` resources + a single-record DNS token |
-| **VERIFY-01** | Adversarial reviewer — threat model, dependency/secret scan, spec-vs-impl diff, latency audit. **Holds no write locks; the reviewer who cannot merge is the reviewer you can trust.** | Fable 5 | none (sole cloud/gh review lane) |
-
-**The governance rules that actually bit:**
-
-- **Ephemeral identity per agent** (provisioned at session start, revoked at end). An agent acts within its scope; no agent touches the default cloud profile, broad tokens, or files outside its lock.
-- **Evidence-gated phases.** No checkbox flips without a commit-hash. **A phase closes only when its gate is GREEN *and reproducible from origin*** — commits pushed, not stranded locally. (One logged correction: stranded local commits blocked rebases and made gates unverifiable from origin; the rule is now "origin must advance as soon as a slice is verified.")
-- **File-level locks, never broad directory claims.** A logged correction after two agents overlapped on the latency harness: lock the exact files you will edit; if a task spans owners, one agent integrates shared files and the others land narrow prerequisite commits first.
-- **The adversarial reviewer caught a thesis-critical bug.** The verdict result-cache key originally omitted the application-data hash — the SPEC *itself* had specified caching by `(sha256, rulePackVersion)`. That bug would have returned a **stale cached verdict and emitted an Ed25519-signed receipt for the *wrong* application data**, violating laws 3 *and* 4. VERIFY-01 caught it; the key was fixed to `(artifactSha256, normalizedApplicationDataHash, rulePackVersion)` (application-data hash = SHA-256 over canonical-JSON normalized fields) and proven dead **by inversion**: same image + different application fields → fresh verdict + a distinct receipt; same image + identical data → 0 ms cache hit. This is implemented in `app/api/endpoints/runs.py` (`_cache_key_for` / `_application_data_hash`) and recorded in `LESSONS.md`.
-- **Security gate on the swarm itself.** The Sentinelayer **"Omar Gate"** (`.github/workflows/omar-gate.yml`) runs on every PR and is a **required status check on the main branch** (P0/P1 block the merge; P2 threshold-gated).
-
-The interview line writes itself: **"we didn't just build a governed verifier; we built it under governance — and here are the receipts for both layers."**
+- **Evidence-gated, reproducible-from-origin.** No milestone is "done" until its gate is green and reproducible from `origin` — commits pushed, not stranded locally.
+- **A thesis-critical bug caught in review.** The verdict result-cache key originally omitted the application-data hash (the SPEC itself had specified caching by `(sha256, rulePackVersion)`). That would have returned a **stale cached verdict and emitted an Ed25519-signed receipt for the *wrong* application data**, violating laws 3 and 4. The key was fixed to `(artifactSha256, normalizedApplicationDataHash, rulePackVersion)` and proven dead **by inversion**: same image + different application fields → fresh verdict + a distinct receipt; same image + identical data → 0 ms cache hit (`app/api/endpoints/runs.py`).
+- **A real-photo failure mode caught and fixed before submission.** A genuine phone photo of a wine bottle initially failed: the label is a small part of the frame, so a single full-frame OCR pass missed the small text, and the commodity router keyed off a field the UI never sent. Both were fixed — region-of-interest OCR (crop + upscale the label/warning bands) and `classType`→commodity routing — and a real-photo that cannot be read now returns an honest **UNREADABLE + reshoot**, never a confident-wrong FAIL on a label whose warning is actually present.
+- **Security gate in CI.** The **Omar Gate** (`.github/workflows/omar-gate.yml`) runs on every PR and is a **required status check on `main`** (P0/P1 block the merge; P2 threshold-gated).
 
 ---
 
