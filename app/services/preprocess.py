@@ -81,7 +81,11 @@ def preprocess_image(
     metrics.update(deskew_metrics)
 
     output = io.BytesIO()
-    image.save(output, format="PNG", optimize=True)
+    # This PNG is an in-memory hand-off to the OCR engine (which re-decodes it),
+    # never stored — so PNG optimization is wasted work. optimize=True cost ~1.8s
+    # on a 2MP phone photo and was the dominant preprocess latency; compress_level=1
+    # produces the same pixels ~16x faster, which is what keeps Law 1 on real photos.
+    image.save(output, format="PNG", compress_level=1)
 
     return PreprocessResult(
         image_bytes=output.getvalue(),

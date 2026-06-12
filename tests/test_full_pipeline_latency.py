@@ -142,3 +142,39 @@ def test_full_pipeline_tesseract_latency_p95_under_budget(monkeypatch: pytest.Mo
         f"full-pipeline p50={p50_ms:.2f}ms p95={p95_ms:.2f}ms "
         f"budget={LATENCY_BUDGET_MS:.2f}ms cases={len(completed)}"
     )
+
+
+@pytest.mark.latency
+def test_real_phone_photo_latency_under_budget(monkeypatch: pytest.MonkeyPatch):
+    """Law 1 on the PRIMARY real-world input: a real iPhone photo of a bottle.
+
+    The §10 fixtures above are small synthetic labels and run in well under budget,
+    so they did not catch that a real ~2MP phone photo (the exact input the brief
+    predicts — an agent photographing a bottle) blew the 5s law: the warning-ROI
+    retry passes upscaled crops to ~3000px and ran ~6.7s. This case closes that
+    blind spot — the OCR stage is now wall-clock bounded and the upscale is capped,
+    so a real photo stays in budget AND still returns an honest UNREADABLE when its
+    warning genuinely cannot be read (glare on curved glass), never a slow guess.
+    """
+    _require_tesseract()
+    monkeypatch.setenv("VISION_PROVIDER", "local")
+    run_endpoint.runs.clear()
+    run_endpoint.receipts.clear()
+    run_endpoint.result_cache.clear()
+
+    case = {
+        "fixtureId": "real_bottle_iphone",
+        "imagePath": "full_pipeline_images/real_bottle_iphone.png",
+        "context": {"brandName": "Cavit", "classType": "Pinot Grigio"},
+        "rulePackPath": "rules/wine-v1.yaml",
+    }
+    run, _duration_ms = asyncio.run(_execute_case(case))
+
+    assert run["timings"]["totalMs"] <= LATENCY_BUDGET_MS, (
+        f"real phone-photo full-pipeline {run['timings']['totalMs']:.0f}ms exceeds "
+        f"budget {LATENCY_BUDGET_MS:.0f}ms — Law 1 must hold on real photos, not just small fixtures"
+    )
+    assert run["providers"]["ocr"] == "local"
+    # Genuinely unreadable warning on glare-lit curved glass → honest UNREADABLE,
+    # never a partial-confident verdict from a budget-truncated read.
+    assert run["verdict"] == RuntimeState.UNREADABLE.value

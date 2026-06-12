@@ -1,8 +1,10 @@
 import hashlib
 import io
+import os
 import re
 import shutil
 import subprocess
+import time
 from functools import lru_cache
 from typing import Any, Optional
 
@@ -15,6 +17,22 @@ from .vision_provider import BoundingBox, OCRResult, VisionProvider, VisionRespo
 
 PROVIDER_NAME = "local"
 ENGINE_NAME = "tesseract"
+
+# Wall-clock budget (seconds) for the whole local-OCR stage, measured from the
+# start of the global Tesseract pass. The warning-ROI retry passes (which only
+# run on images where the global pass did not find the warning, e.g. a curved
+# glare-lit phone photo) are skipped once this deadline is hit, so a real photo
+# can never blow Law 1 (5s p95). The ROI passes do not rescue a genuinely
+# unreadable warning, so capping them costs nothing on hard images — the verdict
+# stays an honest UNREADABLE rather than a slow partial-confident guess.
+def _ocr_wall_budget_seconds() -> float:
+    raw = os.getenv("PROOFLINE_OCR_WALL_BUDGET_SECONDS")
+    if raw:
+        try:
+            return max(0.5, float(raw))
+        except ValueError:
+            pass
+    return 2.5
 LABEL_ROI_CROPS = (
     {
         "cropId": "main-label-center",
@@ -91,8 +109,12 @@ class LocalVisionProvider(VisionProvider):
                 },
             )
 
+        ocr_started = time.monotonic()
         results = _run_tesseract(preprocessed.image_bytes)
-        roi_results, roi_metadata = _run_warning_roi_passes(preprocessed.image_bytes, results)
+        roi_deadline = ocr_started + _ocr_wall_budget_seconds()
+        roi_results, roi_metadata = _run_warning_roi_passes(
+            preprocessed.image_bytes, results, deadline=roi_deadline
+        )
         if roi_results:
             results = [*results, *roi_results]
         readability = compute_region_readability_score(preprocessed.readability_score, results)
@@ -234,6 +256,8 @@ def _run_tesseract_image(
 def _run_warning_roi_passes(
     image_bytes: bytes,
     full_results: list[OCRResult],
+    *,
+    deadline: float | None = None,
 ) -> tuple[list[OCRResult], dict[str, Any]]:
     if _has_warning_prefix(full_results):
         return [], {
@@ -257,7 +281,14 @@ def _run_warning_roi_passes(
 
     collected: list[OCRResult] = []
     passes: list[dict[str, Any]] = []
+    budget_exhausted = False
     for crop_config in LABEL_ROI_CROPS:
+        # Stop spending OCR time once the wall-clock budget is hit: a real phone
+        # photo must not blow Law 1, and these passes do not recover a genuinely
+        # unreadable warning anyway (the verdict stays an honest UNREADABLE).
+        if deadline is not None and time.monotonic() >= deadline:
+            budget_exhausted = True
+            break
         crop_id = str(crop_config["cropId"])
         ratios = crop_config["ratios"]
         config = str(crop_config["config"])
@@ -289,14 +320,30 @@ def _run_warning_roi_passes(
         "addedTokenCount": len(collected),
         "passes": passes,
         "warningPrefixRecovered": _has_warning_prefix(collected),
+        "budgetExhausted": budget_exhausted,
     }
+
+
+# Cap the upscaled ROI-crop long edge. The crops were upscaling to ~3000px, which
+# made each Tesseract pass ~1s and blew Law 1 on real photos. Capping keeps the
+# same set of passes (so the verdict stays stable — all crops still run) but each
+# pass is fast; the smaller upscale is still well above Tesseract's legibility
+# floor for any text it could actually read.
+ROI_CROP_MAX_LONG_EDGE = 700
 
 
 def _enhance_ocr_crop(crop: Image.Image, scale: float) -> Image.Image:
     grayscale = ImageOps.grayscale(crop)
     enhanced = ImageOps.autocontrast(grayscale)
-    width = max(1, int(round(enhanced.width * scale)))
-    height = max(1, int(round(enhanced.height * scale)))
+    target_w = max(1.0, enhanced.width * scale)
+    target_h = max(1.0, enhanced.height * scale)
+    long_edge = max(target_w, target_h)
+    if long_edge > ROI_CROP_MAX_LONG_EDGE:
+        factor = ROI_CROP_MAX_LONG_EDGE / long_edge
+        target_w *= factor
+        target_h *= factor
+    width = max(1, int(round(target_w)))
+    height = max(1, int(round(target_h)))
     resampling = getattr(Image, "Resampling", Image).LANCZOS
     enhanced = enhanced.resize((width, height), resampling)
     enhanced = enhanced.filter(ImageFilter.UnsharpMask(radius=1.2, percent=150, threshold=3))
