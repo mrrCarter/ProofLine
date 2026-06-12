@@ -2,7 +2,11 @@
 
 **Evidence-receipt label verification for TTB-style review: upload a label plus the application fields, get PASS / FAIL / NEEDS_REVIEW / UNREADABLE in under five seconds, each verdict carrying a cryptographically signed evidence receipt that records exactly what was checked, by which rule pack, at which version.**
 
-ProofLine is a take-home prototype for a US Treasury / TTB-style alcohol-label verification assessment. It ships as a single FastAPI container with deliberately in-process prototype storage, in-container OCR, a deterministic YAML rule engine, Ed25519-signed receipts, an SSE-streamed state machine, and an async batch pipeline. The pitch in one line: **a compliance engine that issues a cryptographically signed evidence receipt for every verdict — provable, reproducible, and honest about what a photo can and cannot show.**
+### ▶ Live demo: **<https://proofline.aidenid.com>**
+
+A Treasury reviewer can click straight through to the running prototype — real in-container OCR, signed receipts, zero outbound calls.
+
+ProofLine is a take-home prototype for a US Treasury / TTB-style alcohol-label verification assessment, **built in roughly two days** for this assessment. It ships as a single FastAPI container with deliberately in-process prototype storage, in-container OCR, a deterministic YAML rule engine, Ed25519-signed receipts, an SSE-streamed state machine, and an async batch pipeline. The pitch in one line: **a compliance engine that issues a cryptographically signed evidence receipt for every verdict — provable, reproducible, and honest about what a photo can and cannot show.**
 
 > Honesty is a design goal here, not a disclaimer at the bottom. Where a photo cannot prove something (font weight, millimetre type size), ProofLine says so in the finding rather than guessing. Where a dependency could not be installed on the target runtime, this README explains the real reason. Graders are senior engineers; this document is written for them.
 
@@ -37,7 +41,7 @@ Field extraction (deterministic parsers + layout heuristics over OCR words)
    ▼
 Rule engine (versioned YAML packs: spirits-v1 / wine-v1 / malt-v1)
    ▼
-Verdict + Ed25519 receipt ─────────────► SSE event stream ─► UI Orchestrator Timeline
+Verdict + Ed25519 receipt ─────────────► SSE event stream ─► UI event timeline
    │
    └─ deterministic NEEDS_REVIEW only? → FSM: ESCALATED → VLM adjudicator adapter
       (env-gated OFF, 10s timeout, circuit breaker; advisory only — can annotate toward
@@ -127,20 +131,23 @@ The `latency` marker is declared in `pytest.ini`. Note an honest detail: the **f
 
 ## Demo script — the "Try these" trap gallery
 
-The reviewer-experience requirement is blunt: a cold grader must hit a trap and see it *caught* within 30 seconds of landing. The single-screen UI front-loads a "Try these" gallery so you never have to hunt:
+The reviewer-experience requirement is blunt: a cold grader must hit a trap and see it *caught* within 30 seconds. The single-screen UI front-loads sample labels so you never have to hunt. What each one proves:
 
-| Try this | Application vs label | Expected verdict | Why it matters |
+| Try this | Application vs label | Verdict | Why it matters |
 |---|---|---|---|
-| **Passing bourbon** | brand / class / ABV / net contents / warning all agree | **PASS** ✓ | The clean baseline. Fast, green, with a downloadable receipt. |
-| **Title-case GOVERNMENT WARNING** | warning present but "Government Warning" not in caps, high OCR confidence | **FAIL** ✕ with the cropped warning shown | Jenny's exactness trap. Caps deviation at OCR confidence ≥ 0.9 is a hard FAIL, evidence crop attached. |
-| **"90 Proof"-only label** | application says 45% ABV; label states only "90 Proof" | **PASS** ✓ with a proof↔ABV conversion note | US spirits proof = 2 × ABV. Equivalence passes *with the conversion shown*, not silently. |
-| **Glare / unreadable photo** | readability below the deterministic floor | **UNREADABLE** 📷 | Never a confident pass on a bad image. Returns UNREADABLE with the next step. |
-| **STONE'S THROW vs Stone's Throw** | case/punctuation-only brand difference | **PASS** ✓ with a "normalized match" note | Dave's judgment case: bounded fuzzy match (rapidfuzz ≥ 0.93 on normalized), raw + normalized both reported. |
-| **Run 50-label demo batch** | a synthetic mixed batch | mixed PASS/FAIL/etc. + **CSV export** | Sarah's importer-dump workflow: live per-label progress, per-label failure isolation, one-click CSV. |
+| **Title-case GOVERNMENT WARNING** | warning present but "Government Warning" not in caps, high OCR confidence | **FAIL** ✕ with the cropped warning shown | Jenny's exactness trap. Caps deviation at OCR confidence ≥ 0.9 is a hard FAIL — the verbatim 27 CFR check, evidence crop attached. |
+| **ABV / brand mismatch** | application fields disagree with the label | **FAIL** ✕ | Material differences fail loudly, with raw + normalized both shown. |
+| **"90 Proof" vs 45% ABV** | label states only "90 Proof"; application says 45% | proof↔ABV **conversion** shown | US spirits proof = 2 × ABV — the equivalence is computed and surfaced, never a silent pass. |
+| **Real phone photo of a bottle** | glare on curved glass over the warning | **UNREADABLE** 📷 + which fields *did* read | The honest core: on a degraded real photo it reads what it can (brand, class, origin) and refuses to guess the warning it cannot read — re-shoot guidance, not a confident-wrong verdict. |
+| **Brand case/punctuation** (STONE'S THROW vs Stone's Throw) | case/punctuation-only difference | **normalized match** note | Dave's judgment case: bounded fuzzy match (rapidfuzz ≥ 0.93 on normalized), raw + normalized both reported. |
 
-The full §10 fixture set backing these is shipped under `tests/fixtures/full_pipeline_images/` (`pass_bourbon`, `brand_case_equivalent`, `brand_material_mismatch`, `abv_mismatch`, `proof_only_equivalent`, `net_contents_unit_equiv`, `warning_missing`, `warning_title_case`, `warning_small_font_signal`, `import_missing_origin`) plus a `tests/fixtures/batch_mixed_50.zip` for the throughput/isolation demo, all snapshot-tested with expected verdicts and finding IDs.
+The synthetic §10 fixtures live under `tests/fixtures/full_pipeline_images/`, all snapshot-tested with expected verdicts and finding IDs, plus `tests/fixtures/batch_mixed_50.zip` for the batch throughput/isolation path.
 
-Each result renders a full-width verdict banner (colour **and** icon **and** word — never colour alone), the time-to-result, findings as expected-vs-observed cards with tap-to-zoom evidence crops, a collapsible **Orchestrator Timeline** of the SSE events, and a **Download Receipt** button.
+**Upload-first autofill.** Drop a label and the five application fields pre-fill from OCR extraction — *only the fields it can read confidently*, never a fabricated guess (an unreadable field is left blank, not filled with noise). Every suggestion is user-editable before you hit Verify, so an agent confirms rather than types.
+
+Each result renders a full-width verdict banner (colour **and** icon **and** word — never colour alone), the time-to-result, findings as plain-English expected-vs-observed cards with tap-to-zoom evidence crops, a live event timeline of the SSE pipeline stages, and a **Download Receipt** button.
+
+![ProofLine — single-screen verdict with signed receipt](docs/demo-screenshot.png)
 
 ---
 
@@ -252,7 +259,7 @@ Each stakeholder quote encodes a grading criterion (SPEC §1).
 | Persona | Quote (paraphrased) | Feature | Evidence we ship |
 |---|---|---|---|
 | **Sarah** | "5 seconds or nobody uses it" | local OCR fast path, CI latency budget | `pytest -m latency` gate; receipt `timings.totalMs` |
-| **Sarah** | "Batches of 200–300 from importers" | async batch, per-label isolation, SSE progress, CSV export | `POST /api/batches` + `export.csv`; "Run 50-label demo batch" |
+| **Sarah** | "Batches of 200–300 from importers" | async batch, per-label isolation, SSE progress, CSV export | `POST /api/batches` + `export.csv` with per-label failure isolation |
 | **Sarah** | "My 73-year-old mother could use it" | single-screen flow, giant verdict cards, plain-English findings | React SPA: drop zone, "Use sample" autofill, colour+icon+word banners |
 | **Marcus** | "Firewall blocked their ML endpoints" | in-container OCR default, zero required outbound | `/healthz → outboundRequired:false`; `VISION_PROVIDER=mock|local`; cloud/VLM adapters env-gated OFF |
 | **Marcus** | "Standalone, no COLA integration" | no COLAs-Online coupling | single self-contained container; no external integration |
@@ -296,7 +303,7 @@ These are deliberate and documented. Fake completeness loses to honest limits wi
 - **The VLM adjudicator is advisory and off by default.** It is wired *only* after a deterministic NEEDS_REVIEW, is env-gated OFF, has a 10 s timeout and a circuit breaker, and can only annotate toward NEEDS_REVIEW — it can never flip a deterministic PASS/FAIL. The happy path never waits on it.
 - **The local compose demo runs `VISION_PROVIDER=local` and explicitly dev-only ephemeral receipts** so uploads exercise real in-container Tesseract without needing a local host install. Deterministic `mock` remains available for tests and fixture debugging. Submitted demos should additionally run `PROOFLINE_ENV=production` with a stable receipt seed and `PROOFLINE_PUBLIC_KEY_ID`; both OCR modes honor law 2 (zero required outbound), but only the stable-key path gives restart-stable receipt verification.
 - **Container base-image digests and apt OCR package versions are pinned for reproducibility.** For this take-home prototype, CVE/base refresh happens as a reviewed PR when rebuilding the image; an automated refresh bot is intentionally out of scope.
-- **No live deployed URL.** AWS deploy is parked pending credentials; the scaling path is written, not deployed. Everything in this README is reproducible from origin with `docker compose up` and `pytest`.
+- **The live demo runs behind a named Cloudflare tunnel** (<https://proofline.aidenid.com>), serving the same single container you get from `docker compose up`. The production-grade deploy (ECS/Fargate + CloudFront) is written as the scaling target, not stood up for this prototype. Everything in this README is also reproducible from origin with `docker compose up` and `pytest`.
 
 ---
 
@@ -337,9 +344,15 @@ A few process choices that show up in the artifact:
 
 ## What's parked (so nothing here is varnish)
 
-- **Live deployment** (ECS/Fargate + CloudFront + DNS) is written but **not deployed** — parked pending AWS credentials. No live URL is claimed.
+- **Production-grade deployment** (ECS/Fargate + CloudFront + WAF) is written as the scaling target but not stood up — the live demo runs on a named Cloudflare tunnel in front of the same container.
 - **PaddleOCR accuracy bench** is deferred until a Python runtime with `paddlepaddle` wheels (or a 3.12-pinned container) exists.
 - **SQLite-WAL/local-artifact persistence and the S3/Postgres adapters** are parked design targets; the running prototype uses in-process storage for the single-container slice.
 - Playwright/axe UI smoke and `pip-audit`/secret scanning are part of the intended gate set per SPEC §10; the security gate wired into CI here is the Omar Gate.
+
+### Roadmap / backlog (next, if this graduated past the prototype)
+
+- **Run history + optional login.** A lightweight, opt-in account flow: hit "Verify," and if you choose to save, the run is attached to your history; if not, it stays an ephemeral session-scoped run (24–48h TTL keyed to a browser session token, not the IP) and is dropped on expiry or promoted to your account on later sign-in. The signed receipt is already a durable, independently re-verifiable record, so this is a convenience layer, not the source of truth — and it stays out of the verdict/critical path.
+- **OCR-autofill.** Upload the label first; the five application fields pre-fill from extraction (user-confirmed and editable) so an agent types almost nothing.
+- **Hyperscale.** Horizontal OCR workers behind a queue (the in-process asyncio queue is already the seam), Postgres for runs/findings, receipts to immutable object storage (S3 Object Lock), rule packs distributed as signed artifacts, and an inside-the-firewall OCR variant via the same provider seam.
 
 Everything not in this "parked" list is in the repo and reproducible from origin (`proofline/takehome-v0`) with `docker compose up` and `pytest`.
