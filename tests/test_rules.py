@@ -186,6 +186,46 @@ def test_low_readability_routes_unreadable():
     assert engine.aggregate_verdict(findings) == "UNREADABLE"
 
 
+def test_global_readability_without_warning_anchor_routes_unreadable():
+    engine = RuleEngine()
+    findings = engine.evaluate(
+        _ocr("CAVIT PINOT GRIGIO IMPORTED BY PALM BAY HE RISK OF BIRTH DEFECTS AND MAY CAUSE HEALTH", 0.96),
+        {"readabilityScore": 0.7},
+    )
+    finding = _finding(findings, "IMAGE_READABILITY")
+
+    assert finding.status == FindingStatus.UNREADABLE
+    assert finding.observed["warningAnchorVisible"] is False
+    assert finding.observed["warningFragmentVisible"] is True
+    assert engine.aggregate_verdict(findings) == "UNREADABLE"
+
+
+def test_low_confidence_without_warning_anchor_routes_unreadable():
+    engine = RuleEngine()
+    findings = engine.evaluate(
+        _ocr("CAV PINOT GRIC VALDA PE NOMINAZIONE ORIGIN", 0.7),
+        {"readabilityScore": 0.7},
+    )
+    finding = _finding(findings, "IMAGE_READABILITY")
+
+    assert finding.status == FindingStatus.UNREADABLE
+    assert finding.observed["warningAnchorVisible"] is False
+    assert finding.observed["warningFragmentVisible"] is False
+    assert engine.aggregate_verdict(findings) == "UNREADABLE"
+
+
+def test_high_confidence_missing_warning_anchor_remains_fail():
+    engine = RuleEngine()
+    findings = engine.evaluate(
+        _ocr("OLD FORESTER BOURBON WHISKY 43% ALC/VOL 750 mL", 0.97),
+        {"readabilityScore": 0.97},
+    )
+    finding = _finding(findings, "IMAGE_READABILITY")
+
+    assert finding.status == FindingStatus.PASS
+    assert engine.aggregate_verdict(findings) == "FAIL"
+
+
 def test_low_global_readability_with_required_anchors_routes_review_not_unreadable():
     engine = RuleEngine()
     findings = engine.evaluate(

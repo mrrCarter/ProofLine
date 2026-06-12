@@ -18,6 +18,7 @@ BRAND_MATCH_THRESHOLD = 0.93
 ABV_TOLERANCE = 0.05
 NET_CONTENTS_TOLERANCE_ML = 1.0
 READABILITY_FLOOR = 0.65
+READABILITY_CONFIDENT_DECISION_FLOOR = 0.85
 WARNING_FORMAT_SOURCE_URL = (
     "https://www.ecfr.gov/current/title-27/chapter-I/subchapter-A/part-16/"
     "subpart-C/section-16.22"
@@ -265,6 +266,23 @@ class RuleEngine:
         label_text = self.normalize(self._all_ocr_text(ocr_results))
         warning_confidence = self._anchor_token_confidence(ocr_results, {"government", "warning"})
         warning_visible = warning_confidence is not None and warning_confidence >= floor
+        warning_fragment_tokens = {
+            "according",
+            "surgeon",
+            "pregnancy",
+            "birth",
+            "defects",
+            "risk",
+            "consumption",
+            "impairs",
+            "drive",
+            "machinery",
+            "cause",
+            "health",
+            "problems",
+        }
+        label_tokens = set(re.findall(r"[a-z0-9]+", label_text))
+        warning_fragment_visible = len(label_tokens & warning_fragment_tokens) >= 3
 
         name = self._context_text(
             context,
@@ -293,11 +311,13 @@ class RuleEngine:
         return {
             "warningAnchorVisible": warning_visible,
             "warningAnchorConfidence": round(warning_confidence, 4) if warning_confidence is not None else None,
+            "warningFragmentVisible": warning_fragment_visible,
+            "nameAddressAnchorRequired": bool(name_address_values),
             "nameAddressAnchorVisible": name_address_visible,
             "nameAddressAnchorConfidence": (
                 round(name_address_confidence, 4) if name_address_confidence is not None else None
             ),
-            "requiredAnchorsVisible": warning_visible and name_address_visible,
+            "requiredAnchorsVisible": warning_visible and (not name_address_values or name_address_visible),
         }
 
     def _computed_warning_format_signal(self, context: dict[str, Any]) -> dict[str, Any]:
@@ -850,6 +870,11 @@ class RuleEngine:
         status = FindingStatus.PASS
         if score < floor:
             status = FindingStatus.NEEDS_REVIEW if anchor_visibility["requiredAnchorsVisible"] else FindingStatus.UNREADABLE
+        elif not anchor_visibility["warningAnchorVisible"] and (
+            anchor_visibility["warningFragmentVisible"]
+            or score < READABILITY_CONFIDENT_DECISION_FLOOR
+        ):
+            status = FindingStatus.UNREADABLE
         if status == FindingStatus.PASS:
             explanation = "Image readability is above the deterministic floor."
             remediation = None
@@ -859,6 +884,19 @@ class RuleEngine:
                 "name/address anchors were detected at token confidence above the floor; human review is required."
             )
             remediation = "Review the warning and name/address crops before accepting the label."
+        elif (
+            score >= floor
+            and not anchor_visibility["warningAnchorVisible"]
+            and (
+                anchor_visibility["warningFragmentVisible"]
+                or score < READABILITY_CONFIDENT_DECISION_FLOOR
+            )
+        ):
+            explanation = (
+                "Image has enough global OCR signal, but the required government warning anchor was not "
+                "readable; reshoot or crop the warning panel before making a compliance decision."
+            )
+            remediation = "Upload a clearer close-up of the warning statement."
         else:
             explanation = "Image readability is below the deterministic floor and required content was not located."
             remediation = "Upload a clearer label image."

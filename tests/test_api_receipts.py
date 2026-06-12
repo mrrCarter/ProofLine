@@ -232,6 +232,19 @@ def test_ui_origin_field_is_normalized_for_country_rule():
     assert findings["COUNTRY_OF_ORIGIN_IF_IMPORT"]["expected"]["imported"] is True
 
 
+def test_class_type_routes_wine_rule_pack_from_ui_payload():
+    client = _client()
+    created = _post_minimal_png(client, {"brandName": "Cavit", "classType": "Pinot Grigio"})
+    run = _terminal_run(client, created["runId"])
+
+    assert run["rulePack"] == "wine-v1@1.0.0"
+
+
+def test_class_type_commodity_inference_handles_malt_and_spirits_terms():
+    assert run_endpoint._commodity({"classType": "Malt Beverage Lager"}) == "malt"
+    assert run_endpoint._commodity({"classType": "Single Malt Whisky"}) == "spirits"
+
+
 def test_run_events_stream_times_out_for_stalled_nonterminal_run(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(run_endpoint, "EVENT_STREAM_MAX_IDLE_POLLS", 1)
     monkeypatch.setattr(run_endpoint, "EVENT_STREAM_INITIAL_BACKOFF_SECONDS", 0.0)

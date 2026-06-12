@@ -149,7 +149,55 @@ def _commodity(application_data: dict[str, Any]) -> str:
         value = application_data.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip().casefold()
+    for key in ("classType", "class_type", "classAndType", "class_type_designation"):
+        value = application_data.get(key)
+        if not isinstance(value, str):
+            continue
+        inferred = _commodity_from_class_type(value)
+        if inferred:
+            return inferred
     return "spirits"
+
+
+def _commodity_from_class_type(value: str) -> Optional[str]:
+    normalized = value.strip().casefold()
+    if not normalized:
+        return None
+    tokens = set(normalized.replace("/", " ").replace("-", " ").split())
+    wine_terms = {
+        "wine",
+        "pinot",
+        "grigio",
+        "gris",
+        "chardonnay",
+        "sauvignon",
+        "cabernet",
+        "merlot",
+        "riesling",
+        "zinfandel",
+        "valdadige",
+    }
+    malt_terms = {"malt", "beer", "lager", "ale", "stout", "porter", "pilsner", "ipa"}
+    spirits_terms = {
+        "spirit",
+        "spirits",
+        "whisky",
+        "whiskey",
+        "bourbon",
+        "vodka",
+        "gin",
+        "rum",
+        "tequila",
+        "brandy",
+        "liqueur",
+    }
+    if tokens & wine_terms:
+        return "wine"
+    if tokens & spirits_terms:
+        return "spirits"
+    if tokens & malt_terms:
+        return "malt"
+    return None
 
 
 @lru_cache(maxsize=8)
