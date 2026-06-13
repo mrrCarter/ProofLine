@@ -315,6 +315,7 @@ h1 {
 
 .preview-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin-top: 6px;
@@ -322,6 +323,10 @@ h1 {
 
 .preview-actions .secondary-button {
   flex: 0 1 auto;
+}
+
+.preview-actions .mini-icon-button {
+  flex: 0 0 34px;
 }
 
 .sample-strip {
