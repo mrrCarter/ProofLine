@@ -291,6 +291,10 @@ function stringifyError(caught: unknown, fallback: string): string {
   return caught instanceof Error ? caught.message : fallback;
 }
 
+function readLatencyMs(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function canPreviewFile(file: File): boolean {
   const name = file.name.toLowerCase();
   if (file.type === "image/heic" || file.type === "image/heif" || /\.(heic|heif)$/.test(name)) return false;
@@ -469,6 +473,17 @@ function normalizeBatchRows(payload: BatchResponse | Record<string, unknown>): B
   return rows.map(normalizeBatchRow);
 }
 
+function completedRunEventData(run: RunState, cacheHit = false): Record<string, unknown> {
+  return {
+    runId: run.runId,
+    status: run.verdict ?? run.state,
+    verdict: run.verdict ?? run.state,
+    latencyMs: run.latencyMs ?? null,
+    receiptRef: run.receiptRef ?? `/api/receipts/${run.runId}`,
+    ...(cacheHit ? { cacheHit: true } : {})
+  };
+}
+
 async function labelImageFile(sample: Sample): Promise<File> {
   const response = await fetch(sample.imagePath);
   if (!response.ok) return base64ToFile(PNG_1X1_BASE64, `${sample.id}-label.png`);
@@ -521,6 +536,18 @@ function App() {
   }, [batchFiles]);
 
   const terminalVerdict = runState?.verdict ?? null;
+  const completedRunEvent = useMemo(() => [...timeline].reverse().find((item) => item.event === "run.completed") ?? null, [timeline]);
+  const displayedRunLatencyMs = readLatencyMs(runState?.latencyMs) ?? readLatencyMs(completedRunEvent?.data.latencyMs);
+  const runWasCached = completedRunEvent?.data.cacheHit === true;
+  const singleRunChipLabel = isRunning
+    ? displayedRunLatencyMs != null
+      ? `${displayedRunLatencyMs} ms`
+      : "Running"
+    : runWasCached && displayedRunLatencyMs === 0
+      ? "Cached"
+      : displayedRunLatencyMs != null
+        ? `${displayedRunLatencyMs} ms`
+        : "Ready";
 
   const filePreviewUrl = useMemo(() => {
     if (!file || !canPreviewFile(file)) return null;
@@ -724,6 +751,17 @@ function App() {
     return payload;
   }
 
+  function upsertCompletedRunEvent(run: RunState, cacheHit = false) {
+    setTimeline((current) => {
+      const data = completedRunEventData(run, cacheHit);
+      const index = current.findIndex((item) => item.event === "run.completed");
+      if (index === -1) {
+        return [...current, { id: `run.completed-${current.length}`, event: "run.completed", data }];
+      }
+      return current.map((item, itemIndex) => (itemIndex === index ? { ...item, data: { ...item.data, ...data } } : item));
+    });
+  }
+
   async function refreshBatch(nextBatchId: string) {
     const response = await fetchWithTimeout(`${API_BASE}/api/batches/${nextBatchId}`);
     if (!response.ok) return null;
@@ -773,6 +811,29 @@ function App() {
         receiptRef: payload.receiptUrl ?? null
       });
 
+      if (payload.cacheHit) {
+        const cachedRun = await refreshRun(payload.runId);
+        setTimeline([
+          { id: "run.created-0", event: "run.created", data: { runId: payload.runId, cacheHit: true } },
+          {
+            id: "run.completed-1",
+            event: "run.completed",
+            data: cachedRun
+              ? completedRunEventData(cachedRun, true)
+              : {
+                  runId: payload.runId,
+                  status: "complete",
+                  verdict: "complete",
+                  latencyMs: 0,
+                  receiptRef: payload.receiptUrl ?? `/api/receipts/${payload.runId}`,
+                  cacheHit: true
+                }
+          }
+        ]);
+        setIsRunning(false);
+        return;
+      }
+
       const source = new EventSource(`${API_BASE}${payload.eventsUrl}`);
       source.onmessage = () => undefined;
       let isSettled = false;
@@ -783,7 +844,8 @@ function App() {
         isSettled = true;
         if (watchdogId !== undefined) window.clearTimeout(watchdogId);
         source.close();
-        await refreshRun(payload.runId);
+        const latestRun = await refreshRun(payload.runId);
+        if (latestRun?.verdict) upsertCompletedRunEvent(latestRun);
         if (message) setError(message);
         setIsRunning(false);
       }
@@ -1004,7 +1066,7 @@ function App() {
           </div>
           <div className="run-chip">
             <Clock3 size={18} aria-hidden="true" />
-            {mode === "batch" ? `${batchProgress}%` : runState?.latencyMs != null ? `${runState.latencyMs} ms` : "Ready"}
+            {mode === "batch" ? `${batchProgress}%` : singleRunChipLabel}
           </div>
         </div>
       </header>
@@ -1561,6 +1623,7 @@ function timelineTone(item: TimelineEvent): TimelineTone {
   if (item.event === "run.completed") return toneForStatus(item.data.verdict ?? item.data.status);
   if (item.event === "rule.evaluated") return toneForStatus(item.data.status);
   if (item.event.includes("completed")) return "pass";
+  if (item.event === "run.created" || item.event === "field.extracted" || item.event === "batch.created" || item.event === "batch.item.queued") return "pass";
   if (item.event.includes("escalated") || item.event.includes("opinion")) return "review";
   return "pending";
 }
@@ -1604,7 +1667,9 @@ function timelineSummary(item: TimelineEvent) {
   }
   if (item.event === "run.completed") {
     const verdict = String(item.data.verdict ?? item.data.status ?? "complete");
-    const latency = typeof item.data.latencyMs === "number" ? ` in ${item.data.latencyMs} ms` : "";
+    if (item.data.cacheHit === true && readLatencyMs(item.data.latencyMs) === 0) return `${verdict} from cached result`;
+    const latencyMs = readLatencyMs(item.data.latencyMs);
+    const latency = latencyMs != null ? ` in ${latencyMs} ms` : "";
     return `${verdict}${latency}`;
   }
   if (item.data.runId) return `Run ${String(item.data.runId).slice(0, 8)}`;
