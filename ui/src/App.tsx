@@ -655,7 +655,7 @@ function App() {
     setExtractError(null);
     resetSingleRunState();
     try {
-      selectLabelFile(await labelImageFile(sample), false);
+      selectLabelFile(await labelImageFile(sample));
     } finally {
       setPreparingSampleId(null);
     }
@@ -664,6 +664,12 @@ function App() {
   function onFileChange(event: ChangeEvent<HTMLInputElement>) {
     const nextFile = event.target.files?.[0] ?? null;
     selectLabelFile(nextFile);
+    event.target.value = "";
+  }
+
+  function clearSelectedLabel() {
+    selectLabelFile(null, false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   function addBatchFiles(nextFiles: FileList | File[]) {
@@ -1051,6 +1057,15 @@ function App() {
                     <p>Selected label</p>
                     <strong>{file.name}</strong>
                     <span>{filePreviewUrl ? "Click the thumbnail to inspect before verifying." : "Preview unavailable for this file type; filename is retained for the receipt."}</span>
+                    <div className="preview-actions">
+                      <button className="secondary-button compact" type="button" disabled={isRunning} onClick={() => fileInputRef.current?.click()}>
+                        <UploadCloud size={16} aria-hidden="true" />
+                        Replace image
+                      </button>
+                      <button className="mini-icon-button" type="button" disabled={isRunning} aria-label={`Remove ${file.name}`} title="Remove image" onClick={clearSelectedLabel}>
+                        <X size={16} aria-hidden="true" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ) : null}
@@ -1238,6 +1253,10 @@ function App() {
                 </div>
               ) : null}
               <div className="batch-actions">
+                <button className="secondary-button" type="button" disabled={isBatchRunning} onClick={() => batchInputRef.current?.click()}>
+                  <UploadCloud size={20} aria-hidden="true" />
+                  Add images
+                </button>
                 <button className="verify-button" type="submit" disabled={isBatchRunning || !batchFiles.length}>
                   {isBatchRunning ? <Loader2 className="spin" size={22} aria-hidden="true" /> : <Play size={22} aria-hidden="true" />}
                   Start batch

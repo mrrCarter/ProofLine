@@ -313,6 +313,17 @@ h1 {
   overflow-wrap: anywhere;
 }
 
+.preview-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.preview-actions .secondary-button {
+  flex: 0 1 auto;
+}
+
 .sample-strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
