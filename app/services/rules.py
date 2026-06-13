@@ -771,12 +771,20 @@ class RuleEngine:
             )
 
         present = self.normalize(country) in label_text
+        blocked_by_readability = not present and self._field_evidence_unreadable(ocr_results, context)
+        status = FindingStatus.PASS if present else FindingStatus.FAIL
+        if blocked_by_readability:
+            status = FindingStatus.UNREADABLE
         return Finding(
             ruleId="COUNTRY_OF_ORIGIN_IF_IMPORT",
             severity=FindingSeverity(rule.get("severity", "HIGH")),
-            status=FindingStatus.PASS if present else FindingStatus.FAIL,
+            status=status,
             expected={"imported": True, "country": country, "normalized": self.normalize(country)},
-            observed={"normalizedLabelText": label_text[:500], "countryPresent": present},
+            observed={
+                "normalizedLabelText": label_text[:500],
+                "countryPresent": present,
+                "blockedByReadability": blocked_by_readability,
+            },
             confidence=_confidence_from_items(ocr_results),
             evidence=Evidence(
                 text=self._all_ocr_text(ocr_results)[:500],
@@ -785,9 +793,21 @@ class RuleEngine:
             explanation=(
                 "Country of origin was present for imported product."
                 if present
-                else "Country of origin was not detected for imported product."
+                else (
+                    "Country of origin could not be read well enough to support a missing-origin decision."
+                    if blocked_by_readability
+                    else "Country of origin was not detected for imported product."
+                )
             ),
-            remediation=None if present else "Add country of origin to the label.",
+            remediation=(
+                None
+                if present
+                else (
+                    "Upload a clearer close-up of the country-of-origin statement."
+                    if blocked_by_readability
+                    else "Add country of origin to the label."
+                )
+            ),
         )
 
     def _evaluate_warning_present(
