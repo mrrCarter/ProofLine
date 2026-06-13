@@ -699,6 +699,11 @@ function App() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
+  function moveSelectedLabelToBatch() {
+    if (file) addBatchFiles([file]);
+    setMode("batch");
+  }
+
   function addBatchFiles(nextFiles: FileList | File[]) {
     const incoming = Array.from(nextFiles);
     if (!incoming.length) return;
@@ -1124,6 +1129,10 @@ function App() {
                         <UploadCloud size={16} aria-hidden="true" />
                         Replace image
                       </button>
+                      <button className="secondary-button compact" type="button" disabled={isRunning || isBatchRunning} onClick={moveSelectedLabelToBatch}>
+                        <UploadCloud size={16} aria-hidden="true" />
+                        Add up to 10
+                      </button>
                       <button className="mini-icon-button" type="button" disabled={isRunning} aria-label={`Remove ${file.name}`} title="Remove image" onClick={clearSelectedLabel}>
                         <X size={16} aria-hidden="true" />
                       </button>
@@ -1317,7 +1326,7 @@ function App() {
               <div className="batch-actions">
                 <button className="secondary-button" type="button" disabled={isBatchRunning} onClick={() => batchInputRef.current?.click()}>
                   <UploadCloud size={20} aria-hidden="true" />
-                  Add images
+                  Add images (up to 10)
                 </button>
                 <button className="verify-button" type="submit" disabled={isBatchRunning || !batchFiles.length}>
                   {isBatchRunning ? <Loader2 className="spin" size={22} aria-hidden="true" /> : <Play size={22} aria-hidden="true" />}
