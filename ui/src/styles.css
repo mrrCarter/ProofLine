@@ -488,7 +488,7 @@ input:focus-visible,
 
 .suggestion-item {
   display: grid;
-  grid-template-columns: minmax(112px, 0.62fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(112px, 0.58fr) minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 10px;
   min-height: 42px;
@@ -498,6 +498,11 @@ input:focus-visible,
   background: #ffffff;
 }
 
+.suggestion-item.missing,
+.suggestion-item.unreadable {
+  background: #fbfcfd;
+}
+
 .suggestion-item span {
   color: #35434b;
   font-weight: 760;
@@ -505,6 +510,38 @@ input:focus-visible,
 
 .suggestion-item strong {
   overflow-wrap: anywhere;
+}
+
+.suggestion-item.missing strong,
+.suggestion-item.unreadable strong {
+  color: #52616b;
+}
+
+.suggestion-status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.suggestion-status-pill.detected {
+  color: #10612c;
+  background: #edf9f0;
+}
+
+.suggestion-status-pill.missing {
+  color: #245273;
+  background: #eaf3fb;
+}
+
+.suggestion-status-pill.unreadable {
+  color: #38464f;
+  background: #eef2f5;
 }
 
 .suggestion-help {
