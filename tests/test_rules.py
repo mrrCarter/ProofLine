@@ -133,6 +133,21 @@ def test_import_missing_origin_fails():
 
     assert finding.status == FindingStatus.FAIL
     assert finding.observed["countryPresent"] is False
+    assert finding.observed["blockedByReadability"] is False
+
+
+def test_import_origin_unreadable_does_not_render_hard_fail():
+    engine = RuleEngine()
+    findings = engine.evaluate(
+        _ocr("CAVIT PINOT GRIGIO IMPORTED BY PALM BAY HE RISK OF BIRTH DEFECTS", 0.96),
+        {"origin": "Imported", "countryOfOrigin": "Italy", "readabilityScore": 0.57},
+    )
+    finding = _finding(findings, "COUNTRY_OF_ORIGIN_IF_IMPORT")
+
+    assert finding.status == FindingStatus.UNREADABLE
+    assert finding.observed["countryPresent"] is False
+    assert finding.observed["blockedByReadability"] is True
+    assert engine.aggregate_verdict(findings) == "UNREADABLE"
 
 
 def test_ui_origin_imported_alias_reaches_country_rule():
