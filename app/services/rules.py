@@ -24,6 +24,41 @@ WARNING_FORMAT_SOURCE_URL = (
     "subpart-C/section-16.22"
 )
 TEST_ONLY_OVERRIDE_ENVS = {"dev", "development", "local", "test"}
+WARNING_FRAGMENT_TOKENS = {
+    "according",
+    "surgeon",
+    "pregnancy",
+    "birth",
+    "defects",
+    "risk",
+    "consumption",
+    "impairs",
+    "drive",
+    "machinery",
+    "cause",
+    "health",
+    "problems",
+}
+WARNING_FRAGMENT_COMPACT_MARKERS = (
+    "surgeongeneral",
+    "birthdefects",
+    "healthproblems",
+    "riskofbirth",
+    "impairsyourability",
+)
+BEVERAGE_CLASS_COMPOUNDS: tuple[tuple[str, str], ...] = (
+    ("cabernetsauvignon", "cabernet sauvignon"),
+    ("pinotgrigio", "pinot grigio"),
+    ("pinotgris", "pinot gris"),
+    ("sauvignonblanc", "sauvignon blanc"),
+    ("bourbonwhiskey", "bourbon whiskey"),
+    ("bourbonwhisky", "bourbon whisky"),
+    ("ryewhiskey", "rye whiskey"),
+    ("ryewhisky", "rye whisky"),
+    ("straightbourbon", "straight bourbon"),
+    ("straightwhiskey", "straight whiskey"),
+    ("straightwhisky", "straight whisky"),
+)
 
 
 def normalize_label_text(text: str) -> str:
@@ -32,6 +67,30 @@ def normalize_label_text(text: str) -> str:
     value = re.sub(r"['’]", "", value)
     value = re.sub(r"[^a-z0-9]+", " ", value)
     return " ".join(value.split())
+
+
+def expand_beverage_class_compounds(normalized_text: str) -> str:
+    expanded = normalized_text
+    for joined, spaced in BEVERAGE_CLASS_COMPOUNDS:
+        expanded = re.sub(rf"\b{joined}\b", spaced, expanded)
+    return " ".join(expanded.split())
+
+
+def text_match_variants(normalized_text: str) -> tuple[str, ...]:
+    expanded = expand_beverage_class_compounds(normalized_text)
+    if expanded == normalized_text:
+        return (normalized_text,)
+    return (normalized_text, expanded)
+
+
+def compact_label_text(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", text.casefold())
+
+
+def warning_anchor_present(text: str) -> bool:
+    if re.search(r"\bgovernment\s+warning\s*:", text, re.IGNORECASE) is not None:
+        return True
+    return any(compact_label_text(token) == "governmentwarning" for token in re.findall(r"[A-Za-z0-9]+", text))
 
 
 def collapse_statement_whitespace(text: str) -> str:
@@ -233,6 +292,8 @@ class RuleEngine:
         observed = collapse_statement_whitespace(self._all_ocr_text(ocr_results))
         prefix = re.search(r"\bgovernment\s+warning\s*:", observed, re.IGNORECASE)
         prefix_text = prefix.group(0) if prefix else None
+        if prefix_text is None and warning_anchor_present(observed):
+            prefix_text = "GOVERNMENT WARNING"
         return {
             "expected": expected,
             "observed": observed,
@@ -257,32 +318,40 @@ class RuleEngine:
             return None
         return min(matched.values())
 
+    def _warning_anchor_confidence(self, ocr_results: list[dict[str, Any]]) -> Optional[float]:
+        token_confidence = self._anchor_token_confidence(ocr_results, {"government", "warning"})
+        if token_confidence is not None:
+            return token_confidence
+        compact_anchor_confidences = [
+            _clamp(float(confidence))
+            for item in ocr_results
+            if warning_anchor_present(str(item.get("text", "")))
+            for confidence in [_as_float(item.get("confidence"))]
+            if confidence is not None
+        ]
+        if not compact_anchor_confidences:
+            return None
+        return max(compact_anchor_confidences)
+
+    def _warning_fragment_visible(self, label_text: str) -> bool:
+        normalized = self.normalize(label_text)
+        label_tokens = set(re.findall(r"[a-z0-9]+", normalized))
+        if len(label_tokens & WARNING_FRAGMENT_TOKENS) >= 3:
+            return True
+        compact_text = compact_label_text(label_text)
+        return any(marker in compact_text for marker in WARNING_FRAGMENT_COMPACT_MARKERS)
+
     def _readability_anchor_visibility(
         self,
         ocr_results: list[dict[str, Any]],
         context: dict[str, Any],
         floor: float,
     ) -> dict[str, Any]:
-        label_text = self.normalize(self._all_ocr_text(ocr_results))
-        warning_confidence = self._anchor_token_confidence(ocr_results, {"government", "warning"})
+        all_text = self._all_ocr_text(ocr_results)
+        label_text = self.normalize(all_text)
+        warning_confidence = self._warning_anchor_confidence(ocr_results)
         warning_visible = warning_confidence is not None and warning_confidence >= floor
-        warning_fragment_tokens = {
-            "according",
-            "surgeon",
-            "pregnancy",
-            "birth",
-            "defects",
-            "risk",
-            "consumption",
-            "impairs",
-            "drive",
-            "machinery",
-            "cause",
-            "health",
-            "problems",
-        }
-        label_tokens = set(re.findall(r"[a-z0-9]+", label_text))
-        warning_fragment_visible = len(label_tokens & warning_fragment_tokens) >= 3
+        warning_fragment_visible = self._warning_fragment_visible(all_text)
 
         name = self._context_text(
             context,
@@ -435,22 +504,24 @@ class RuleEngine:
         for item in ocr_results:
             raw_text = str(item.get("text", ""))
             normalized_ocr = self.normalize(raw_text)
-            ratio = fuzz.ratio(normalized_expected, normalized_ocr) / 100.0
-            if ratio > best_ratio:
-                best_ratio = ratio
-                best_match = item
-                best_normalized = normalized_ocr
+            for candidate in text_match_variants(normalized_ocr):
+                ratio = fuzz.ratio(normalized_expected, candidate) / 100.0
+                if ratio > best_ratio:
+                    best_ratio = ratio
+                    best_match = item
+                    best_normalized = candidate
 
         full_text = self.normalize(self._all_ocr_text(ocr_results))
         if full_text:
-            full_text_ratio = max(
-                fuzz.partial_ratio(normalized_expected, full_text) / 100.0,
-                fuzz.token_set_ratio(normalized_expected, full_text) / 100.0,
-            )
-            if full_text_ratio > best_ratio:
-                best_ratio = full_text_ratio
-                best_match = None
-                best_normalized = full_text
+            for candidate in text_match_variants(full_text):
+                full_text_ratio = max(
+                    fuzz.partial_ratio(normalized_expected, candidate) / 100.0,
+                    fuzz.token_set_ratio(normalized_expected, candidate) / 100.0,
+                )
+                if full_text_ratio > best_ratio:
+                    best_ratio = full_text_ratio
+                    best_match = None
+                    best_normalized = candidate
 
         return best_ratio, best_match, best_normalized
 
@@ -817,7 +888,7 @@ class RuleEngine:
     ) -> Finding:
         rule = self.rules_by_id["GOVERNMENT_WARNING_PRESENT"]
         all_text = collapse_statement_whitespace(self._all_ocr_text(ocr_results))
-        anchor_present = re.search(r"\bgovernment\s+warning\s*:", all_text, re.IGNORECASE) is not None
+        anchor_present = warning_anchor_present(all_text)
         unreadable_warning_evidence = (
             not anchor_present and self._warning_evidence_unreadable(ocr_results, context)
         )

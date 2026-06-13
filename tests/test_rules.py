@@ -60,6 +60,19 @@ def test_class_type_match_passes():
     assert finding.expected["normalized"] == "kentucky straight bourbon whisky"
 
 
+def test_class_type_match_handles_joined_beverage_class_tokens():
+    engine = RuleEngine()
+    findings = engine.evaluate(
+        _ocr("OLD FORESTER KENTUCKY STRAIGHT BOURBONWHISKY 43% ALC/VOL 750ML"),
+        {"classType": "Bourbon Whisky"},
+    )
+    finding = _finding(findings, "CLASS_TYPE_MATCH")
+
+    assert finding.status == FindingStatus.PASS
+    assert "bourbon whisky" in finding.observed["normalized"]
+    assert finding.expected["threshold"] == 0.93
+
+
 def test_warning_exact_text_passes_with_wrapped_lines():
     engine = RuleEngine()
     wrapped = GOVERNMENT_WARNING_TEXT.replace("birth defects. ", "birth defects.\n")
@@ -88,6 +101,15 @@ def test_warning_title_case_low_confidence_needs_review():
     finding = _finding(findings, "GOVERNMENT_WARNING_EXACT_TEXT")
 
     assert finding.status == FindingStatus.NEEDS_REVIEW
+
+
+def test_warning_present_handles_joined_government_warning_anchor():
+    engine = RuleEngine()
+    findings = engine.evaluate(_ocr("GOVERNMENTWARNING: text is run together", confidence=0.94), {})
+    finding = _finding(findings, "GOVERNMENT_WARNING_PRESENT")
+
+    assert finding.status == FindingStatus.PASS
+    assert finding.observed["anchorPresent"] is True
 
 
 def test_aggregate_verdict_fails_on_high_deterministic_failure():
@@ -278,6 +300,58 @@ def test_unreadable_field_evidence_does_not_render_hard_field_failures():
         assert finding.status == FindingStatus.UNREADABLE
         assert finding.observed["blockedByReadability"] is True
 
+    assert engine.aggregate_verdict(findings) == "UNREADABLE"
+
+
+def test_rapidocr_run_on_warning_fragment_blocks_missing_net_hard_fail():
+    engine = RuleEngine("rules/wine-v1.yaml")
+    findings = engine.evaluate(
+        _ocr_many(
+            [
+                ("PALMBAY", 0.95),
+                ("INTERNATIONAL", 0.95),
+                ("WESTPALM8EACHFL33401", 0.91),
+                ("ALC12.5%BVOL", 0.96),
+                ("ITES", 0.88),
+                ("OTHESURGEON GENERAL", 0.9),
+                ("AVIT", 0.91),
+                ("PINOT GRIGIO", 0.97),
+                ("VALDADIGE", 0.95),
+                ("PRODUCTOFITALY", 0.96),
+                ("IMPORTEDBY", 0.94),
+                ("PALMBAY", 0.95),
+                ("INTERNATIONAL", 0.95),
+                ("WESTPALMBEACHFL33401", 0.91),
+                ("CONTAINS SULFITES", 0.97),
+                ("ALC 125%BYVL", 0.9),
+            ]
+        ),
+        {
+            "brandName": "Cavit",
+            "classType": "Pinot Grigio",
+            "abv": "12.5% ABV",
+            "netContents": "750 mL",
+            "ocr_provider": "rapidocr",
+            "readabilityScore": 0.95,
+        },
+    )
+
+    assert _finding(findings, "CLASS_TYPE_MATCH").status == FindingStatus.PASS
+    assert _finding(findings, "ALCOHOL_CONTENT_MATCH").status == FindingStatus.PASS
+
+    net_contents = _finding(findings, "NET_CONTENTS_MATCH")
+    warning_present = _finding(findings, "GOVERNMENT_WARNING_PRESENT")
+    warning_text = _finding(findings, "GOVERNMENT_WARNING_EXACT_TEXT")
+    readability = _finding(findings, "IMAGE_READABILITY")
+
+    assert net_contents.status == FindingStatus.UNREADABLE
+    assert net_contents.observed["blockedByReadability"] is True
+    assert warning_present.status == FindingStatus.UNREADABLE
+    assert warning_present.observed["blockedByReadability"] is True
+    assert warning_text.status == FindingStatus.UNREADABLE
+    assert warning_text.observed["blockedByReadability"] is True
+    assert readability.status == FindingStatus.UNREADABLE
+    assert readability.observed["warningFragmentVisible"] is True
     assert engine.aggregate_verdict(findings) == "UNREADABLE"
 
 
