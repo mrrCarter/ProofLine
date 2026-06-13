@@ -60,6 +60,19 @@ def test_class_type_match_passes():
     assert finding.expected["normalized"] == "kentucky straight bourbon whisky"
 
 
+def test_class_type_match_handles_joined_beverage_class_tokens():
+    engine = RuleEngine()
+    findings = engine.evaluate(
+        _ocr("OLD FORESTER KENTUCKY STRAIGHT BOURBONWHISKY 43% ALC/VOL 750ML"),
+        {"classType": "Bourbon Whisky"},
+    )
+    finding = _finding(findings, "CLASS_TYPE_MATCH")
+
+    assert finding.status == FindingStatus.PASS
+    assert "bourbon whisky" in finding.observed["normalized"]
+    assert finding.expected["threshold"] == 0.93
+
+
 def test_warning_exact_text_passes_with_wrapped_lines():
     engine = RuleEngine()
     wrapped = GOVERNMENT_WARNING_TEXT.replace("birth defects. ", "birth defects.\n")

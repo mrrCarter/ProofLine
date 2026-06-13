@@ -24,6 +24,19 @@ WARNING_FORMAT_SOURCE_URL = (
     "subpart-C/section-16.22"
 )
 TEST_ONLY_OVERRIDE_ENVS = {"dev", "development", "local", "test"}
+BEVERAGE_CLASS_COMPOUNDS: tuple[tuple[str, str], ...] = (
+    ("cabernetsauvignon", "cabernet sauvignon"),
+    ("pinotgrigio", "pinot grigio"),
+    ("pinotgris", "pinot gris"),
+    ("sauvignonblanc", "sauvignon blanc"),
+    ("bourbonwhiskey", "bourbon whiskey"),
+    ("bourbonwhisky", "bourbon whisky"),
+    ("ryewhiskey", "rye whiskey"),
+    ("ryewhisky", "rye whisky"),
+    ("straightbourbon", "straight bourbon"),
+    ("straightwhiskey", "straight whiskey"),
+    ("straightwhisky", "straight whisky"),
+)
 
 
 def normalize_label_text(text: str) -> str:
@@ -32,6 +45,20 @@ def normalize_label_text(text: str) -> str:
     value = re.sub(r"['’]", "", value)
     value = re.sub(r"[^a-z0-9]+", " ", value)
     return " ".join(value.split())
+
+
+def expand_beverage_class_compounds(normalized_text: str) -> str:
+    expanded = normalized_text
+    for joined, spaced in BEVERAGE_CLASS_COMPOUNDS:
+        expanded = re.sub(rf"\b{joined}\b", spaced, expanded)
+    return " ".join(expanded.split())
+
+
+def text_match_variants(normalized_text: str) -> tuple[str, ...]:
+    expanded = expand_beverage_class_compounds(normalized_text)
+    if expanded == normalized_text:
+        return (normalized_text,)
+    return (normalized_text, expanded)
 
 
 def collapse_statement_whitespace(text: str) -> str:
@@ -435,22 +462,24 @@ class RuleEngine:
         for item in ocr_results:
             raw_text = str(item.get("text", ""))
             normalized_ocr = self.normalize(raw_text)
-            ratio = fuzz.ratio(normalized_expected, normalized_ocr) / 100.0
-            if ratio > best_ratio:
-                best_ratio = ratio
-                best_match = item
-                best_normalized = normalized_ocr
+            for candidate in text_match_variants(normalized_ocr):
+                ratio = fuzz.ratio(normalized_expected, candidate) / 100.0
+                if ratio > best_ratio:
+                    best_ratio = ratio
+                    best_match = item
+                    best_normalized = candidate
 
         full_text = self.normalize(self._all_ocr_text(ocr_results))
         if full_text:
-            full_text_ratio = max(
-                fuzz.partial_ratio(normalized_expected, full_text) / 100.0,
-                fuzz.token_set_ratio(normalized_expected, full_text) / 100.0,
-            )
-            if full_text_ratio > best_ratio:
-                best_ratio = full_text_ratio
-                best_match = None
-                best_normalized = full_text
+            for candidate in text_match_variants(full_text):
+                full_text_ratio = max(
+                    fuzz.partial_ratio(normalized_expected, candidate) / 100.0,
+                    fuzz.token_set_ratio(normalized_expected, candidate) / 100.0,
+                )
+                if full_text_ratio > best_ratio:
+                    best_ratio = full_text_ratio
+                    best_match = None
+                    best_normalized = candidate
 
         return best_ratio, best_match, best_normalized
 
