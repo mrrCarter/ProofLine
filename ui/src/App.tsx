@@ -80,8 +80,10 @@ type FieldSuggestion = {
   key: keyof LabelFields;
   label: string;
   value: string;
+  status?: "detected" | "missing" | "unreadable";
   confidence?: number;
   source?: string;
+  reason?: string;
 };
 
 type Sample = {
@@ -405,20 +407,33 @@ function suggestionSource(value: unknown): string | undefined {
   return typeof sourceValue === "string" && sourceValue.trim() ? sourceValue : undefined;
 }
 
+function suggestionStatus(value: unknown): FieldSuggestion["status"] {
+  const status = readString(asRecord(value).status, "").toLowerCase();
+  if (status === "detected" || status === "missing" || status === "unreadable") return status;
+  return undefined;
+}
+
 function normalizeSuggestionItem(key: keyof LabelFields, value: unknown): FieldSuggestion | null {
+  const status = suggestionStatus(value);
   const nextValue = suggestionValue(value);
-  if (!nextValue) return null;
+  if (!nextValue && status !== "missing" && status !== "unreadable") return null;
   return {
     key,
     label: fieldLabels[key],
     value: nextValue,
+    status: status ?? "detected",
     confidence: suggestionConfidence(value),
-    source: suggestionSource(value)
+    source: suggestionSource(value),
+    reason: readString(asRecord(value).reason, "") || undefined
   };
 }
 
 function normalizeFieldSuggestions(payload: unknown): FieldSuggestion[] {
   const source = asRecord(payload);
+  const rawStatuses = source.expectedFieldItems ?? source.fieldStatusItems ?? source.expectedFields ?? source.fieldStatuses;
+  const fieldStatuses = normalizeFieldStatusItems(rawStatuses);
+  if (fieldStatuses.length) return fieldStatuses;
+
   const rawSuggestions = source.suggestedFields ?? source.fields ?? source.extractedFields ?? source.suggestions ?? payload;
   const suggestions = new Map<keyof LabelFields, FieldSuggestion>();
 
@@ -448,6 +463,33 @@ function normalizeFieldSuggestions(payload: unknown): FieldSuggestion[] {
     }
   }
   return [...suggestions.values()];
+}
+
+function normalizeFieldStatusItems(value: unknown): FieldSuggestion[] {
+  const statuses = new Map<keyof LabelFields, FieldSuggestion>();
+  if (Array.isArray(value)) {
+    value.forEach((item) => {
+      const itemRecord = asRecord(item);
+      const key = fieldKeyFromName(itemRecord.key ?? itemRecord.field ?? itemRecord.name ?? itemRecord.id);
+      if (!key) return;
+      const suggestion = normalizeSuggestionItem(key, item);
+      if (suggestion) statuses.set(key, suggestion);
+    });
+    return [...statuses.values()];
+  }
+
+  const statusRecord = asRecord(value);
+  for (const [rawKey, item] of Object.entries(statusRecord)) {
+    const key = fieldKeyFromName(asRecord(item).key ?? rawKey);
+    if (!key) continue;
+    const suggestion = normalizeSuggestionItem(key, item);
+    if (suggestion) statuses.set(key, suggestion);
+  }
+  return [...statuses.values()];
+}
+
+function isDetectedSuggestion(suggestion: FieldSuggestion) {
+  return (suggestion.status ?? "detected") === "detected" && suggestion.value.trim().length > 0;
 }
 
 function normalizeBatchRow(value: unknown, index: number): BatchRow {
@@ -668,6 +710,7 @@ function App() {
     setFields((current) => {
       const next = { ...current };
       fieldSuggestions.forEach((suggestion) => {
+        if (!isDetectedSuggestion(suggestion)) return;
         next[suggestion.key] = suggestion.value;
       });
       return next;
@@ -1535,13 +1578,22 @@ function SuggestedFieldsPanel({
   onApply: () => void;
   onDismiss: () => void;
 }) {
+  const detectedCount = suggestions.filter(isDetectedSuggestion).length;
+  const gapCount = Math.max(0, suggestions.length - detectedCount);
+  const hasDetectedSuggestions = detectedCount > 0;
+  const summary = isExtracting
+    ? "Reading label text"
+    : suggestions.length
+      ? `${detectedCount} detected${gapCount ? `, ${gapCount} gaps` : ""}`
+      : "No suggestions";
+
   if (!isExtracting && !suggestions.length && !error) return null;
   return (
     <div className="suggestion-panel" aria-live="polite">
       <div className="suggestion-panel-header">
         <div>
           <strong>Extracted fields</strong>
-          <span>{isExtracting ? "Reading label text" : suggestions.length ? `${suggestions.length} suggestions` : "No suggestions"}</span>
+          <span>{summary}</span>
         </div>
         <button className="mini-icon-button" type="button" aria-label="Dismiss extracted fields" onClick={onDismiss}>
           <X size={18} aria-hidden="true" />
@@ -1562,16 +1614,20 @@ function SuggestedFieldsPanel({
       {suggestions.length ? (
         <>
           <div className="suggestion-list">
-            {suggestions.map((suggestion) => (
-              <div className="suggestion-item" key={suggestion.key}>
-                <span>{suggestion.label}</span>
-                <strong>{suggestion.value}</strong>
-                {suggestion.confidence !== undefined ? <small>{Math.round(suggestion.confidence * 100)}%</small> : null}
-              </div>
-            ))}
+            {suggestions.map((suggestion) => {
+              const status = suggestion.status ?? "detected";
+              return (
+                <div className={`suggestion-item ${status}`} key={suggestion.key}>
+                  <span>{suggestion.label}</span>
+                  <strong>{isDetectedSuggestion(suggestion) ? suggestion.value : extractionStatusValue(status)}</strong>
+                  <small>{suggestion.confidence !== undefined ? `${Math.round(suggestion.confidence * 100)}%` : extractionStatusLabel(status)}</small>
+                  <span className={`suggestion-status-pill ${status}`}>{extractionStatusLabel(status)}</span>
+                </div>
+              );
+            })}
           </div>
           <p className="suggestion-help">Save extracted values to the application fields, then adjust anything before verifying.</p>
-          <button className="secondary-button compact" type="button" onClick={onApply}>
+          <button className="secondary-button compact" type="button" onClick={onApply} disabled={!hasDetectedSuggestions}>
             <CheckCircle2 size={18} aria-hidden="true" />
             Save extracted fields
           </button>
@@ -1579,6 +1635,18 @@ function SuggestedFieldsPanel({
       ) : null}
     </div>
   );
+}
+
+function extractionStatusLabel(status: FieldSuggestion["status"]) {
+  if (status === "missing") return "Missing";
+  if (status === "unreadable") return "Unreadable";
+  return "Detected";
+}
+
+function extractionStatusValue(status: FieldSuggestion["status"]) {
+  if (status === "unreadable") return "Not readable";
+  if (status === "missing") return "Not detected";
+  return "";
 }
 
 function RetakeGuidance({ findings }: { findings: Finding[] }) {
