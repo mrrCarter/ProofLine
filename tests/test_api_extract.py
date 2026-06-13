@@ -144,6 +144,46 @@ def test_extract_omits_noisy_hard_bottle_guesses(monkeypatch):
     assert response.json()["suggestedFields"] == {}
 
 
+def test_extract_accepts_validated_hard_bottle_abv_without_net_contents_guess(monkeypatch):
+    class FakeProvider:
+        async def process_image(self, image_bytes, artifact_hash=None):
+            return VisionResponse(
+                results=[
+                    OCRResult(
+                        text="CAVIT PINOT GRIGIO",
+                        confidence=0.96,
+                        bbox=BoundingBox(vertices=[[0, 0], [10, 0], [10, 10], [0, 10]]),
+                    ),
+                    OCRResult(
+                        text="ALC 12.5% BY VOL",
+                        confidence=0.91,
+                        bbox=BoundingBox(vertices=[[0, 12], [10, 12], [10, 22], [0, 22]]),
+                    ),
+                    OCRResult(
+                        text="L25064 PRODUCT OF ITALY WO",
+                        confidence=0.94,
+                        bbox=BoundingBox(vertices=[[0, 24], [10, 24], [10, 34], [0, 34]]),
+                    ),
+                ],
+                readability_score=0.82,
+                metadata={"provider": "rapid", "status": "rapid_success", "labelType": "wine"},
+            )
+
+    monkeypatch.setattr(extract_endpoint, "get_vision_provider", lambda: FakeProvider())
+    client = _client()
+
+    response = client.post(
+        "/api/extract",
+        files={"image": ("hard-bottle.png", MINIMAL_PNG, "image/png")},
+    )
+
+    assert response.status_code == 200
+    suggestions = _suggestions_by_key(response.json())
+
+    assert suggestions["alcoholContent"]["value"] == "12.5%"
+    assert "netContents" not in suggestions
+
+
 def test_extract_rejects_invalid_file_type():
     client = _client()
 
