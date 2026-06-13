@@ -6,7 +6,12 @@ from fastapi import APIRouter, File, Request, UploadFile
 
 from app.api.endpoints.runs import MAX_UPLOAD_BYTES, _detect_upload_type, _raise_error
 from app.services.factory import get_vision_provider
-from app.services.rules import READABILITY_CONFIDENT_DECISION_FLOOR, RuleEngine
+from app.services.rules import (
+    READABILITY_CONFIDENT_DECISION_FLOOR,
+    RuleEngine,
+    expand_beverage_class_compounds,
+    normalize_label_text,
+)
 
 
 router = APIRouter()
@@ -23,6 +28,7 @@ FIELD_LABELS = {
     "producerCity": "Producer city",
     "producerState": "Producer state",
 }
+EXPECTED_FIELD_KEYS = tuple(FIELD_LABELS.keys())
 CLASS_KEYWORDS = {
     "ale",
     "beer",
@@ -112,18 +118,25 @@ async def extract_fields(
     provider = get_vision_provider()
     ocr = await provider.process_image(image_bytes, artifact_hash=artifact_hash)
     provider_name = str(ocr.metadata.get("provider", "unknown"))
+    ocr_items = [{"text": item.text, "confidence": item.confidence} for item in ocr.results]
     suggestion_items = _suggest_fields(
-        [{"text": item.text, "confidence": item.confidence} for item in ocr.results],
+        ocr_items,
         ocr.metadata,
         ocr.readability_score,
     )
     suggested_fields = {item["key"]: item for item in suggestion_items}
+    field_status_items = _field_statuses(suggestion_items, ocr_items, ocr.readability_score)
+    field_statuses = {item["key"]: item for item in field_status_items}
     return {
         "artifactSha256": artifact_hash,
         "provider": provider_name,
         "readabilityScore": round(float(ocr.readability_score), 4),
         "suggestedFields": suggested_fields,
         "suggestedFieldItems": suggestion_items,
+        "fieldStatuses": field_statuses,
+        "fieldStatusItems": field_status_items,
+        "expectedFields": field_statuses,
+        "expectedFieldItems": field_status_items,
     }
 
 
@@ -181,10 +194,57 @@ def _put(
     suggestions[key] = {
         "key": key,
         "label": FIELD_LABELS[key],
+        "status": "detected",
         "value": value,
         "confidence": max(0.0, min(1.0, confidence)),
         "source": source,
     }
+
+
+def _field_statuses(
+    suggestion_items: list[dict[str, Any]],
+    ocr_items: list[dict[str, Any]],
+    readability_score: float,
+) -> list[dict[str, Any]]:
+    detected = {item["key"]: item for item in suggestion_items}
+    unreadable_missing = _missing_fields_are_unreadable(ocr_items, readability_score)
+    status_items: list[dict[str, Any]] = []
+    for key in EXPECTED_FIELD_KEYS:
+        if key in detected:
+            item = dict(detected[key])
+            item["status"] = "detected"
+            status_items.append(item)
+            continue
+        status = "unreadable" if unreadable_missing else "missing"
+        status_items.append(
+            {
+                "key": key,
+                "label": FIELD_LABELS[key],
+                "status": status,
+                "value": "",
+                "confidence": 0.0,
+                "source": "ocr",
+                "reason": (
+                    "field-not-readable"
+                    if status == "unreadable"
+                    else "field-not-detected"
+                ),
+            }
+        )
+    return status_items
+
+
+def _missing_fields_are_unreadable(
+    ocr_items: list[dict[str, Any]],
+    readability_score: float,
+) -> bool:
+    if not ocr_items:
+        return False
+    engine = RuleEngine()
+    return engine._field_evidence_unreadable(  # noqa: SLF001 - extract shares rule-layer honesty semantics.
+        ocr_items,
+        {"readabilityScore": readability_score},
+    )
 
 
 def _text(item: dict[str, Any]) -> str:
@@ -220,12 +280,14 @@ def _class_candidate(
 ) -> Optional[tuple[str, float]]:
     for item in sorted(ocr_items, key=lambda value: _effective_confidence(value, readability_score), reverse=True):
         text = _text(item)
-        tokens = set(re.findall(r"[a-z0-9]+", text.casefold()))
+        normalized_text = normalize_label_text(text)
+        expanded_text = expand_beverage_class_compounds(normalized_text)
+        tokens = set(re.findall(r"[a-z0-9]+", expanded_text))
         if len(_alpha_tokens(text)) < 2 or _has_noise(text):
             continue
         confidence = _effective_confidence(item, readability_score)
         if confidence >= READABILITY_CONFIDENT_DECISION_FLOOR and tokens & CLASS_KEYWORDS:
-            return text, confidence
+            return (expanded_text.upper() if expanded_text != normalized_text else text), confidence
     return None
 
 
