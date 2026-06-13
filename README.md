@@ -147,8 +147,6 @@ The synthetic §10 fixtures live under `tests/fixtures/full_pipeline_images/`, a
 
 Each result renders a full-width verdict banner (colour **and** icon **and** word — never colour alone), the time-to-result, findings as plain-English expected-vs-observed cards with tap-to-zoom evidence crops, a live event timeline of the SSE pipeline stages, and a **Download Receipt** button.
 
-![ProofLine — single-screen verdict with signed receipt](docs/demo-screenshot.png)
-
 ---
 
 ## API surface
