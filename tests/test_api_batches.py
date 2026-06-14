@@ -148,6 +148,31 @@ def test_batch_accepts_zip_upload():
     assert batch["items"][0]["receiptRef"] == f"/api/receipts/{batch['items'][0]['runId']}"
 
 
+def test_demo_batch_runs_real_fixture_archive_and_returns_receipts():
+    client = _client()
+
+    response = client.post("/api/batches/demo")
+
+    assert response.status_code == 200
+    batch = response.json()
+    assert batch["batchId"].startswith("demo-")
+    assert batch["state"] == "COMPLETED"
+    assert batch["eventsUrl"] == f"/api/batches/{batch['batchId']}/events"
+    assert sum(batch["counts"].values()) == 50
+    assert batch["counts"] == {"PASS": 20, "FAIL": 25, "NEEDS_REVIEW": 5}
+
+    completed_items = [item for item in batch["items"] if item["state"] != "ERROR"]
+    assert len(completed_items) == 50
+    assert all(item["runId"] in run_endpoint.runs for item in completed_items)
+    assert all(item["receiptRef"] == f"/api/receipts/{item['runId']}" for item in completed_items)
+
+    receipt = client.get(completed_items[0]["receiptRef"])
+    assert receipt.status_code == 200
+    verified = client.post("/api/receipts/verify", json=receipt.json())
+    assert verified.status_code == 200
+    assert verified.json()["valid"] is True
+
+
 def test_batch_rejects_zip_member_above_limit(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(batch_endpoint, "MAX_ZIP_MEMBER_BYTES", 4)
     response = _client().post(

@@ -528,11 +528,15 @@ async def create_run(
     cached = result_cache.get(_cache_key_for(artifact_hash, rule_pack_ref, parsed_application_data))
     if cached:
         _complete_cached_run(runs[run_id], cached)
+        public_run = _public_run(runs[run_id])
         return {
             "runId": run_id,
             "requestId": rid,
             "eventsUrl": f"/api/runs/{run_id}/events",
-            "receiptUrl": _receipt_ref(run_id),
+            "receiptUrl": public_run["receiptRef"],
+            "receiptRef": public_run["receiptRef"],
+            "verdict": public_run["verdict"],
+            "state": public_run["state"],
             "cacheHit": True,
         }
 
