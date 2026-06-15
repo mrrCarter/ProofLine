@@ -492,6 +492,16 @@ function isDetectedSuggestion(suggestion: FieldSuggestion) {
   return (suggestion.status ?? "detected") === "detected" && suggestion.value.trim().length > 0;
 }
 
+function mergeDetectedSuggestions(current: LabelFields, suggestions: FieldSuggestion[], overwrite = false): LabelFields {
+  const next = { ...current };
+  suggestions.forEach((suggestion) => {
+    if (!isDetectedSuggestion(suggestion)) return;
+    if (!overwrite && next[suggestion.key].trim()) return;
+    next[suggestion.key] = suggestion.value;
+  });
+  return next;
+}
+
 function normalizeBatchRow(value: unknown, index: number): BatchRow {
   const source = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const verdict = readString(source.verdict, "") as Verdict;
@@ -698,6 +708,7 @@ function App() {
       const payload = await response.json();
       const suggestions = normalizeFieldSuggestions(payload);
       setFieldSuggestions(suggestions);
+      setFields((current) => mergeDetectedSuggestions(current, suggestions));
       if (!suggestions.length) setExtractError("No fields were extracted from this image.");
     } catch (caught) {
       if (requestId === extractionRequestRef.current) setExtractError(stringifyError(caught, "Field extraction failed."));
@@ -707,14 +718,7 @@ function App() {
   }
 
   function applyFieldSuggestions() {
-    setFields((current) => {
-      const next = { ...current };
-      fieldSuggestions.forEach((suggestion) => {
-        if (!isDetectedSuggestion(suggestion)) return;
-        next[suggestion.key] = suggestion.value;
-      });
-      return next;
-    });
+    setFields((current) => mergeDetectedSuggestions(current, fieldSuggestions, true));
   }
 
   async function applySample(sample: Sample) {
