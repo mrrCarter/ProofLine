@@ -7,11 +7,13 @@ import time
 import uuid
 import zipfile
 from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, File, Request, UploadFile, Form
 from fastapi.responses import PlainTextResponse, StreamingResponse
 
+from app.api.endpoints import fixtures as fixture_endpoint
 from app.api.endpoints import runs as run_endpoint
 from app.core.fsm import RuntimeState
 from app.schemas.error import ErrorResponse
@@ -32,6 +34,7 @@ BATCH_TERMINAL_STATES = {
     RuntimeState.UNREADABLE.value,
     RuntimeState.ERROR.value,
 }
+DEMO_BATCH_ZIP = run_endpoint.PROJECT_ROOT / "tests" / "fixtures" / "batch_mixed_50.zip"
 
 batches: dict[str, dict[str, Any]] = {}
 
@@ -120,6 +123,23 @@ def _application_for_file(
     csv_rows: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     return {**base_application_data, **csv_rows.get(filename, {})}
+
+
+def _fixture_id_from_demo_filename(filename: str) -> Optional[str]:
+    stem = Path(filename).stem
+    parts = stem.split("_", 1)
+    if len(parts) == 2 and parts[0].isdigit():
+        stem = parts[1]
+    if "_v" in stem:
+        candidate, version = stem.rsplit("_v", 1)
+        if version.isdigit():
+            stem = candidate
+    return stem or None
+
+
+def _demo_application_for_file(filename: str) -> dict[str, Any]:
+    fixture_id = _fixture_id_from_demo_filename(filename)
+    return fixture_endpoint.application_data_for_fixture(fixture_id) if fixture_id else {}
 
 
 def _compression_ratio(member: zipfile.ZipInfo) -> float:
@@ -409,6 +429,91 @@ async def create_batch(
     else:
         batches[batch_id]["state"] = "COMPLETED"
         _append_batch_event(batches[batch_id], "batch.completed", {"batchId": batch_id, "counts": _batch_counts(batches[batch_id])})
+
+    return _public_batch(batches[batch_id])
+
+
+@router.post(
+    "/batches/demo",
+    response_model=dict,
+    responses={404: {"model": ErrorResponse}},
+)
+async def create_demo_batch(request: Request):
+    rid = run_endpoint._request_id(request, None)
+    if not DEMO_BATCH_ZIP.is_file():
+        run_endpoint._raise_error(
+            404,
+            "DEMO_BATCH_NOT_FOUND",
+            "Demo batch fixture archive not found",
+            rid,
+            {"path": str(DEMO_BATCH_ZIP.relative_to(run_endpoint.PROJECT_ROOT))},
+        )
+
+    archive_bytes = DEMO_BATCH_ZIP.read_bytes()
+    uploads, _expanded_zip_bytes = _uploads_from_zip(
+        DEMO_BATCH_ZIP.name,
+        archive_bytes,
+        rid,
+        MAX_BATCH_LABELS,
+        MAX_ZIP_TOTAL_BYTES,
+    )
+    if not uploads:
+        run_endpoint._raise_error(400, "EMPTY_BATCH", "Demo batch contains no files", rid)
+
+    batch_id = f"demo-{uuid.uuid4()}"
+    items: list[dict[str, Any]] = []
+    for filename, image_bytes in uploads:
+        detected_type = run_endpoint._detect_upload_type(image_bytes)
+        if detected_type is None:
+            items.append(
+                _create_error_item(
+                    filename,
+                    "INVALID_FILE_TYPE",
+                    "Demo fixture bytes must be a supported jpeg, png, webp, heic, heif, or pdf artifact",
+                )
+            )
+            continue
+        items.append(
+            _create_queued_item(
+                filename,
+                image_bytes,
+                detected_type,
+                run_endpoint._normalize_application_data(_demo_application_for_file(filename)),
+                f"{rid}:{filename}",
+            )
+        )
+
+    batches[batch_id] = {
+        "batchId": batch_id,
+        "requestId": rid,
+        "state": "QUEUED",
+        "items": items,
+        "events": [],
+        "createdAtMonotonic": time.monotonic(),
+        "demo": True,
+    }
+    _append_batch_event(
+        batches[batch_id],
+        "batch.created",
+        {"batchId": batch_id, "count": len(items), "source": "tests/fixtures/batch_mixed_50.zip"},
+    )
+    for item in items:
+        event_name = "batch.item.queued" if item["state"] == "QUEUED" else "batch.item.failed"
+        _append_batch_event(
+            batches[batch_id],
+            event_name,
+            {"batchId": batch_id, "itemId": item["itemId"], "filename": item["filename"], "state": item["state"]},
+        )
+
+    if any(item["state"] == "QUEUED" for item in items):
+        await _process_batch(batch_id)
+    else:
+        batches[batch_id]["state"] = "COMPLETED"
+        _append_batch_event(
+            batches[batch_id],
+            "batch.completed",
+            {"batchId": batch_id, "counts": _batch_counts(batches[batch_id])},
+        )
 
     return _public_batch(batches[batch_id])
 

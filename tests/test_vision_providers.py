@@ -1,5 +1,7 @@
 import asyncio
+import hashlib
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -17,6 +19,30 @@ def test_mock_provider_reports_engine_version_for_unknown_hash():
     assert response.metadata["engine"] == "mock"
     assert response.metadata["providerVersion"] == MOCK_ENGINE_VERSION
     assert response.metadata["status"] == "mock_unknown_hash"
+
+
+def test_mock_provider_recognizes_generated_fixture_image_hashes():
+    image = Path("tests/fixtures/full_pipeline_images/pass_bourbon.png").read_bytes()
+    artifact_hash = hashlib.sha256(image).hexdigest()
+
+    response = asyncio.run(MockVisionProvider().process_image(image, artifact_hash=artifact_hash))
+
+    texts = {item.text for item in response.results}
+    assert response.metadata["status"] == "mock_success"
+    assert response.metadata["fixtureId"] == "pass_bourbon"
+    assert "750 ML" in texts
+
+
+def test_mock_provider_exposes_generated_format_signal_as_pipeline_context():
+    image = Path("tests/fixtures/full_pipeline_images/warning_small_font_signal.png").read_bytes()
+    artifact_hash = hashlib.sha256(image).hexdigest()
+
+    response = asyncio.run(MockVisionProvider().process_image(image, artifact_hash=artifact_hash))
+
+    warning_format = response.metadata["pipelineContext"]["warningFormat"]
+    assert response.metadata["fixtureId"] == "warning_small_font_signal"
+    assert warning_format["boldSignal"] == "unlikely"
+    assert warning_format["sizeSignal"] == "too_small"
 
 
 def test_local_provider_reports_engine_versions_on_preprocess_error(monkeypatch):

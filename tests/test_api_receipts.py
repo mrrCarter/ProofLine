@@ -189,6 +189,10 @@ def test_artifact_rulepack_cache_returns_signed_receipt_for_new_run():
     assert second["cacheHit"] is True
     second_run = _terminal_run(client, second["runId"])
 
+    assert second["verdict"] == first_run["verdict"]
+    assert second["state"] == first_run["state"]
+    assert second["receiptRef"] == f"/api/receipts/{second['runId']}"
+    assert second["receiptUrl"] == second["receiptRef"]
     assert second_run["runId"] != first_run["runId"]
     assert second_run["artifactSha256"] == first_run["artifactSha256"]
     assert second_run["rulePack"] == first_run["rulePack"]

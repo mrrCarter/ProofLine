@@ -492,6 +492,20 @@ function isDetectedSuggestion(suggestion: FieldSuggestion) {
   return (suggestion.status ?? "detected") === "detected" && suggestion.value.trim().length > 0;
 }
 
+function applyDetectedSuggestions(
+  current: LabelFields,
+  suggestions: FieldSuggestion[],
+  replaceExisting: boolean
+): LabelFields {
+  const next = { ...current };
+  suggestions.forEach((suggestion) => {
+    if (!isDetectedSuggestion(suggestion)) return;
+    if (!replaceExisting && next[suggestion.key].trim()) return;
+    next[suggestion.key] = suggestion.value;
+  });
+  return next;
+}
+
 function normalizeBatchRow(value: unknown, index: number): BatchRow {
   const source = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const verdict = readString(source.verdict, "") as Verdict;
@@ -698,6 +712,9 @@ function App() {
       const payload = await response.json();
       const suggestions = normalizeFieldSuggestions(payload);
       setFieldSuggestions(suggestions);
+      if (suggestions.length) {
+        setFields((current) => applyDetectedSuggestions(current, suggestions, false));
+      }
       if (!suggestions.length) setExtractError("No fields were extracted from this image.");
     } catch (caught) {
       if (requestId === extractionRequestRef.current) setExtractError(stringifyError(caught, "Field extraction failed."));
@@ -707,14 +724,7 @@ function App() {
   }
 
   function applyFieldSuggestions() {
-    setFields((current) => {
-      const next = { ...current };
-      fieldSuggestions.forEach((suggestion) => {
-        if (!isDetectedSuggestion(suggestion)) return;
-        next[suggestion.key] = suggestion.value;
-      });
-      return next;
-    });
+    setFields((current) => applyDetectedSuggestions(current, fieldSuggestions, true));
   }
 
   async function applySample(sample: Sample) {
@@ -1626,10 +1636,10 @@ function SuggestedFieldsPanel({
               );
             })}
           </div>
-          <p className="suggestion-help">Save extracted values to the application fields, then adjust anything before verifying.</p>
+          <p className="suggestion-help">Detected values populate blank application fields automatically.</p>
           <button className="secondary-button compact" type="button" onClick={onApply} disabled={!hasDetectedSuggestions}>
             <CheckCircle2 size={18} aria-hidden="true" />
-            Save extracted fields
+            Replace with extracted fields
           </button>
         </>
       ) : null}
