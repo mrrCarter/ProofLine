@@ -158,9 +158,19 @@ export function findingSentence(finding: FindingTextInput): string {
     }
 
     case "IMAGE_READABILITY": {
-      const score = formatNumber(pickNumber(observed, ["readabilityScore"]), 2) ?? "unknown";
-      const floor = formatNumber(pickNumber(expected, ["minimumReadabilityScore"]), 2) ?? "required";
+      const scoreNum = pickNumber(observed, ["readabilityScore"]);
+      const floorNum = pickNumber(expected, ["minimumReadabilityScore"]);
+      const score = formatNumber(scoreNum, 2) ?? "unknown";
+      const floor = formatNumber(floorNum, 2) ?? "required";
       if (status === "PASS") return `Image readability is sufficient: score ${score} meets the ${floor} minimum.`;
+      // Non-PASS can also mean a required warning region was not readable.
+      const knownScores = scoreNum !== null && floorNum !== null;
+      if (knownScores && scoreNum >= floorNum) {
+        return `Image is globally readable (score ${score} meets the ${floor} minimum), but the required government warning could not be read for an automated decision; reshoot or crop the warning panel.`;
+      }
+      if (status === "NEEDS_REVIEW") {
+        return `Image readability is below the ${floor} minimum (score ${score}), but required anchors were detected, so human review is required.`;
+      }
       return `Image is unreadable for automated review: score ${score} is below the ${floor} minimum.`;
     }
 
