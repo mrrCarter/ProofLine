@@ -86,6 +86,12 @@ type FieldSuggestion = {
   reason?: string;
 };
 
+type RawOcrItem = {
+  text: string;
+  confidence?: number;
+  bbox?: number[][];
+};
+
 type Sample = {
   id: string;
   name: string;
@@ -488,6 +494,27 @@ function normalizeFieldStatusItems(value: unknown): FieldSuggestion[] {
   return [...statuses.values()];
 }
 
+function normalizeRawOcrItems(payload: unknown): RawOcrItem[] {
+  const source = asRecord(payload);
+  const rawItems = source.rawOcrItems ?? source.ocrItems ?? source.rawItems ?? [];
+  if (!Array.isArray(rawItems)) return [];
+
+  const seen = new Set<string>();
+  const normalized: RawOcrItem[] = [];
+  rawItems.forEach((item) => {
+    const itemRecord = asRecord(item);
+    const text = typeof item === "string" ? item.trim() : suggestionValue(itemRecord.text ?? itemRecord.raw ?? itemRecord.value);
+    if (!text || seen.has(text.toLowerCase())) return;
+    seen.add(text.toLowerCase());
+    normalized.push({
+      text,
+      confidence: suggestionConfidence(item),
+      bbox: Array.isArray(itemRecord.bbox) ? (itemRecord.bbox as number[][]) : undefined
+    });
+  });
+  return normalized.slice(0, 24);
+}
+
 function isDetectedSuggestion(suggestion: FieldSuggestion) {
   return (suggestion.status ?? "detected") === "detected" && suggestion.value.trim().length > 0;
 }
@@ -556,6 +583,7 @@ function App() {
   const [batchFiles, setBatchFiles] = useState<File[]>([]);
   const [fields, setFields] = useState<LabelFields>(emptyFields);
   const [fieldSuggestions, setFieldSuggestions] = useState<FieldSuggestion[]>([]);
+  const [rawOcrItems, setRawOcrItems] = useState<RawOcrItem[]>([]);
   const [isExtractingFields, setIsExtractingFields] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
@@ -686,6 +714,7 @@ function App() {
     setFile(nextFile);
     resetSingleRunState();
     setFieldSuggestions([]);
+    setRawOcrItems([]);
     setExtractError(null);
     setIsExtractingFields(false);
     if (nextFile && extractFields) void extractSuggestedFields(nextFile, extractionRequestRef.current);
@@ -711,7 +740,9 @@ function App() {
 
       const payload = await response.json();
       const suggestions = normalizeFieldSuggestions(payload);
+      const rawItems = normalizeRawOcrItems(payload);
       setFieldSuggestions(suggestions);
+      setRawOcrItems(rawItems);
       if (suggestions.length) {
         setFields((current) => applyDetectedSuggestions(current, suggestions, false));
       }
@@ -732,6 +763,7 @@ function App() {
     setMode("single");
     setFields(sample.fields);
     setFieldSuggestions([]);
+    setRawOcrItems([]);
     setExtractError(null);
     resetSingleRunState();
     try {
@@ -1217,11 +1249,13 @@ function App() {
             <section className="fields-band" aria-label="Application fields">
               <SuggestedFieldsPanel
                 suggestions={fieldSuggestions}
+                rawItems={rawOcrItems}
                 isExtracting={isExtractingFields}
                 error={extractError}
                 onApply={applyFieldSuggestions}
                 onDismiss={() => {
                   setFieldSuggestions([]);
+                  setRawOcrItems([]);
                   setExtractError(null);
                 }}
               />
@@ -1577,12 +1611,14 @@ function FieldGrid({
 
 function SuggestedFieldsPanel({
   suggestions,
+  rawItems,
   isExtracting,
   error,
   onApply,
   onDismiss
 }: {
   suggestions: FieldSuggestion[];
+  rawItems: RawOcrItem[];
   isExtracting: boolean;
   error: string | null;
   onApply: () => void;
@@ -1597,7 +1633,7 @@ function SuggestedFieldsPanel({
       ? `${detectedCount} detected${gapCount ? `, ${gapCount} gaps` : ""}`
       : "No suggestions";
 
-  if (!isExtracting && !suggestions.length && !error) return null;
+  if (!isExtracting && !suggestions.length && !rawItems.length && !error) return null;
   return (
     <div className="suggestion-panel" aria-live="polite">
       <div className="suggestion-panel-header">
@@ -1642,6 +1678,22 @@ function SuggestedFieldsPanel({
             Replace with extracted fields
           </button>
         </>
+      ) : null}
+      {rawItems.length ? (
+        <div className="raw-ocr-panel">
+          <div className="raw-ocr-header">
+            <strong>OCR fragments</strong>
+            <span>Reference only</span>
+          </div>
+          <ul className="raw-ocr-list">
+            {rawItems.map((item, index) => (
+              <li key={`${item.text}-${index}`}>
+                <span>{item.text}</span>
+                {item.confidence !== undefined ? <small>{Math.round(item.confidence * 100)}%</small> : null}
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
     </div>
   );

@@ -118,6 +118,21 @@ def test_extract_parses_net_contents_and_origin_from_ocr(monkeypatch):
     assert statuses["origin"]["status"] == "detected"
     assert statuses["producerName"]["status"] == "missing"
 
+    body = response.json()
+    assert body["rawText"] == "CAVIT PINOT GRIGIO Product of Italy 750 mL"
+    assert body["rawOcrItems"] == [
+        {
+            "text": "CAVIT PINOT GRIGIO",
+            "confidence": 0.96,
+            "bbox": [[0, 0], [10, 0], [10, 10], [0, 10]],
+        },
+        {
+            "text": "Product of Italy 750 mL",
+            "confidence": 0.93,
+            "bbox": [[0, 12], [10, 12], [10, 22], [0, 22]],
+        },
+    ]
+
 
 def test_extract_omits_noisy_hard_bottle_guesses(monkeypatch):
     class FakeProvider:

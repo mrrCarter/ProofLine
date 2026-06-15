@@ -119,6 +119,7 @@ async def extract_fields(
     ocr = await provider.process_image(image_bytes, artifact_hash=artifact_hash)
     provider_name = str(ocr.metadata.get("provider", "unknown"))
     ocr_items = [{"text": item.text, "confidence": item.confidence} for item in ocr.results]
+    raw_ocr_items = _raw_ocr_items(ocr.results)
     suggestion_items = _suggest_fields(
         ocr_items,
         ocr.metadata,
@@ -137,7 +138,27 @@ async def extract_fields(
         "fieldStatusItems": field_status_items,
         "expectedFields": field_statuses,
         "expectedFieldItems": field_status_items,
+        "rawOcrItems": raw_ocr_items,
+        "rawText": " ".join(item["text"] for item in raw_ocr_items),
     }
+
+
+def _raw_ocr_items(results: list[Any]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for result in results:
+        text = str(getattr(result, "text", "")).strip()
+        if not text:
+            continue
+        confidence = getattr(result, "confidence", 0.0)
+        bbox = getattr(result, "bbox", None)
+        items.append(
+            {
+                "text": text,
+                "confidence": max(0.0, min(1.0, float(confidence))),
+                "bbox": getattr(bbox, "vertices", None),
+            }
+        )
+    return items[:40]
 
 
 def _suggest_fields(
