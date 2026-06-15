@@ -237,6 +237,27 @@ def test_global_readability_without_warning_anchor_routes_unreadable():
     assert engine.aggregate_verdict(findings) == "UNREADABLE"
 
 
+def test_high_global_readability_warning_fragments_without_anchor_stays_unreadable():
+    engine = RuleEngine()
+    findings = engine.evaluate(
+        _ocr(
+            "CAVIT PINOT GRIGIO 12.5% ALC BY VOL CONTAINS SULFITES PRODUCT OF ITALY "
+            "RISK OF BIRTH DEFECTS AND MAY CAUSE HEALTH PROBLEMS",
+            0.96,
+        ),
+        {"readabilityScore": 0.93},
+    )
+    finding = _finding(findings, "IMAGE_READABILITY")
+
+    assert finding.status == FindingStatus.UNREADABLE
+    assert finding.observed["readabilityScore"] == 0.93
+    assert finding.observed["warningAnchorVisible"] is False
+    assert finding.observed["warningFragmentVisible"] is True
+    assert "required government warning anchor was not readable" in finding.explanation
+    assert _finding(findings, "GOVERNMENT_WARNING_PRESENT").status == FindingStatus.UNREADABLE
+    assert engine.aggregate_verdict(findings) == "UNREADABLE"
+
+
 def test_low_confidence_without_warning_anchor_routes_unreadable():
     engine = RuleEngine()
     findings = engine.evaluate(
